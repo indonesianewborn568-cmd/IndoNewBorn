@@ -130,8 +130,8 @@
          ondrop="handleDrop(event)">
       <input type="file" id="csv-input" accept=".csv" onchange="handleFile(this.files[0])">
       <div style="font-size:2rem;margin-bottom:8px">&#8659;</div>
-      <div>Drop a CSV file here or click to browse</div>
-      <div style="font-size:12px;margin-top:6px">Export from any instrument dashboard, then upload here</div>
+      <div>Drop the Combined Annual Report CSV here or click to browse</div>
+      <div style="font-size:12px;margin-top:6px">Accepts the combined format with Total + Elevated sections</div>
     </div>
     <div id="upload-status" class="upload-status"></div>
   </div>
@@ -324,51 +324,100 @@ function handleDrop(e) {
   if (file) handleFile(file);
 }
 
+function parseCSV(text) {
+  // Parse the combined annual report CSV format:
+  // Has two sections: TOTAL TESTS and ELEVATED RESULTS
+  // Each section has header rows, separator rows, and data rows
+  const lines = text.split(/\r?\n/);
+  const totalMap = {};   // test_name|month -> count
+  const elevMap  = {};
+  let section = null;    // 'total' or 'elevated'
+
+  lines.forEach(raw => {
+    const line = raw.replace(/"/g,'').trim();
+    if (!line || line.startsWith('-')) return;
+    if (line.includes('TOTAL TESTS'))    { section = 'total';    return; }
+    if (line.includes('ELEVATED'))       { section = 'elevated'; return; }
+    if (line.startsWith('Test name'))    return; // header row
+    if (line.startsWith('Changed database')) return; // sqlcmd artifact
+    if (!section) return;
+
+    const cols = line.split(',').map(c=>c.trim());
+    const testName = cols[0];
+    if (!testName || testName === 'Total' || testName === ' ') return;
+
+    for (let m = 0; m < 12; m++) {
+      const count = parseInt(cols[m+1]) || 0;
+      if (count > 0) {
+        const key = `${testName}|${m+1}`;
+        if (section === 'total')    totalMap[key] = (totalMap[key]||0) + count;
+        if (section === 'elevated') elevMap[key]  = (elevMap[key] ||0) + count;
+      }
+    }
+  });
+  return { totalMap, elevMap };
+}
+
 async function handleFile(file) {
   if (!file) return;
   const status = document.getElementById('upload-status');
   status.textContent = 'Reading file...';
-  const text = await file.text();
-  const lines = text.split('\n').filter(l=>l.trim());
-  if (lines.length < 2) { status.textContent = 'Error: file appears empty.'; return; }
 
-  const instrName = prompt('Enter instrument name for this upload:', file.name.replace('.csv',''));
+  // Auto-detect instrument name and year from filename
+  // e.g. "Combined_Annual_Report_Soetomo_GSP_2_2026.csv"
+  //   -> instrument: "Soetomo GSP 2", year: 2026
+  let autoInstr = file.name.replace(/\.csv$/i,'');
+  autoInstr = autoInstr.replace(/Combined_Annual_Report_/i,'').trim();
+  const yearMatch = autoInstr.match(/(\d{4})$/);
+  let autoYear = yearMatch ? parseInt(yearMatch[1]) : curYear;
+  autoInstr = autoInstr.replace(/_?(\d{4})$/, '').replace(/_/g,' ').trim();
+
+  const instrName = prompt('Instrument name (auto-detected from filename):', autoInstr) || autoInstr;
   if (!instrName) { status.textContent = 'Upload cancelled.'; return; }
-  const yearVal = parseInt(prompt('Enter year for this data:', curYear));
+  const yearVal = parseInt(prompt('Year (auto-detected from filename):', autoYear)) || autoYear;
   if (!yearVal) { status.textContent = 'Upload cancelled.'; return; }
 
-  // Parse CSV
-  const headers = lines[0].split(',').map(h=>h.replace(/"/g,'').trim());
+  const text = await file.text();
+  const { totalMap, elevMap } = parseCSV(text);
+
+  // Merge into rows by test+month
+  const allKeys = new Set([...Object.keys(totalMap), ...Object.keys(elevMap)]);
   const rows = [];
-  for (let i = 1; i < lines.length - 1; i++) { // skip totals row
-    const cols = lines[i].split(',').map(c=>c.replace(/"/g,'').trim());
-    const testName = cols[0];
-    if (!testName || testName === 'Total') continue;
-    for (let m = 0; m < 12; m++) {
-      const count = parseInt(cols[m+1]) || 0;
-      if (count > 0) {
-        rows.push({
-          instrument: instrName, test_name: testName,
-          year: yearVal, month: m+1,
-          total_count: count, elevated_count: 0,
-          pushed_at: new Date().toISOString()
-        });
-      }
-    }
+  const now = new Date().toISOString();
+  allKeys.forEach(key => {
+    const [testName, monthStr] = key.split('|');
+    rows.push({
+      instrument:     instrName,
+      test_name:      testName,
+      year:           yearVal,
+      month:          parseInt(monthStr),
+      total_count:    totalMap[key] || 0,
+      elevated_count: elevMap[key]  || 0,
+      pushed_at:      now
+    });
+  });
+
+  if (rows.length === 0) {
+    status.textContent = 'No data found in file. Check the file format.';
+    return;
   }
 
-  status.textContent = `Uploading ${rows.length} rows...`;
+  status.textContent = `Uploading ${rows.length} rows for ${instrName} (${yearVal})...`;
   try {
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/test_results`, {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
-      },
-      body: JSON.stringify(rows)
-    });
-    if (!resp.ok) throw new Error(await resp.text());
-    status.textContent = `✓ Uploaded ${rows.length} rows for ${instrName} (${yearVal})`;
+    // Push in batches of 100
+    for (let i = 0; i < rows.length; i += 100) {
+      const chunk = rows.slice(i, i+100);
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/test_results`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify(chunk)
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+    }
+    status.textContent = `✓ Uploaded ${rows.length} rows for ${instrName} (${yearVal}). Refreshing...`;
     await loadData();
   } catch(e) {
     status.textContent = 'Upload failed: ' + e.message;
