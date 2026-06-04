@@ -167,30 +167,46 @@ async function supabase(path, params) {
 }
 
 async function init() {
-  // Load years
-  const years = await supabase('test_results', { select: 'year', order: 'year.desc' });
-  const uniqueYears = [...new Set(years.map(r => r.year))];
-  const sel = document.getElementById('year-select');
-  uniqueYears.forEach(y => {
-    const o = document.createElement('option');
-    o.value = y; o.textContent = y;
-    if (y === curYear) o.selected = true;
-    sel.appendChild(o);
-  });
-  if (!sel.value && uniqueYears.length) sel.value = uniqueYears[0];
+  try {
+    // Load years
+    const years = await supabase('test_results', { select: 'year', order: 'year.desc' });
+    const uniqueYears = [...new Set(years.map(r => r.year))];
+    const sel = document.getElementById('year-select');
+    sel.innerHTML = '';
+    if (uniqueYears.length === 0) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = 'No data yet';
+      sel.appendChild(o);
+      setStatus('', 'No data yet — use Manual upload to add data');
+      document.getElementById('tbody-total').innerHTML =
+        '<tr><td colspan="14" style="text-align:center;padding:2rem;color:var(--muted)">No data yet. Use the Manual upload tab to upload a CSV file.</td></tr>';
+      return;
+    }
+    uniqueYears.forEach(y => {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      if (y === curYear) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (!sel.value && uniqueYears.length) sel.value = uniqueYears[0];
 
-  // Load instruments
-  const instrs = await supabase('test_results', { select: 'instrument', order: 'instrument' });
-  const uniqueInstrs = [...new Set(instrs.map(r => r.instrument))];
-  const isel = document.getElementById('instrument-select');
-  uniqueInstrs.forEach(name => {
-    const o = document.createElement('option');
-    o.value = name; o.textContent = name;
-    isel.appendChild(o);
-  });
+    // Load instruments
+    const instrs = await supabase('test_results', { select: 'instrument', order: 'instrument' });
+    const uniqueInstrs = [...new Set(instrs.map(r => r.instrument))];
+    const isel = document.getElementById('instrument-select');
+    isel.innerHTML = '<option value="all">All instruments</option>';
+    uniqueInstrs.forEach(name => {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      isel.appendChild(o);
+    });
 
-  document.getElementById('m-instruments').textContent = uniqueInstrs.length;
-  await loadData();
+    document.getElementById('m-instruments').textContent = uniqueInstrs.length;
+    await loadData();
+  } catch(e) {
+    setStatus('error', 'Connection error');
+    showError('Could not connect to database: ' + e.message);
+  }
 }
 
 async function loadData() {
