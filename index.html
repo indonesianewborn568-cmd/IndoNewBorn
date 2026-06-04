@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LifeCycle — Cloud Dashboard</title>
+<title>NBS Analytics — Annual Test Count</title>
 <style>
   :root {
     --bg:#f8f8f6;--surface:#fff;--border:rgba(0,0,0,0.1);--border-strong:rgba(0,0,0,0.18);
@@ -68,22 +68,22 @@
 <div class="container">
   <div class="header">
     <div>
-      <h1>NBS Analytics — annual test count</h1>
-      <div class="header-sub" id="subtitle">NBS Analytics — all instruments</div>
+      <h1>NBS Analytics &#8212; annual test count</h1>
+      <div class="header-sub" id="subtitle">NBS Analytics &#8212; all instruments</div>
       <div class="status"><span class="dot loading" id="status-dot"></span><span id="status-text">Loading...</span></div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:12px;background:var(--blue-bg);color:var(--blue-text);padding:4px 12px;border-radius:20px;font-weight:500" id="year-badge">—</div>
+      <div style="font-size:12px;background:var(--blue-bg);color:var(--blue-text);padding:4px 12px;border-radius:20px;font-weight:500" id="year-badge">&#8212;</div>
     </div>
   </div>
 
   <div id="error-banner" class="error-banner"></div>
 
   <div class="metrics">
-    <div class="metric"><div class="metric-label">Total tests YTD</div><div class="metric-value" id="m-total">—</div><div class="metric-sub">all result codes</div></div>
-    <div class="metric"><div class="metric-label">Elevated YTD</div><div class="metric-value" id="m-elevated">—</div><div class="metric-sub">excl. -I-20 / -R codes</div></div>
-    <div class="metric"><div class="metric-label">Instruments</div><div class="metric-value" id="m-instruments">—</div><div class="metric-sub">reporting</div></div>
-    <div class="metric"><div class="metric-label">Test types</div><div class="metric-value" id="m-types">—</div><div class="metric-sub">unique assays</div></div>
+    <div class="metric"><div class="metric-label">Total tests YTD</div><div class="metric-value" id="m-total">&#8212;</div><div class="metric-sub">all result codes</div></div>
+    <div class="metric"><div class="metric-label">Elevated YTD</div><div class="metric-value" id="m-elevated">&#8212;</div><div class="metric-sub">excl. -I-20 / -R codes</div></div>
+    <div class="metric"><div class="metric-label">Instruments</div><div class="metric-value" id="m-instruments">&#8212;</div><div class="metric-sub">reporting</div></div>
+    <div class="metric"><div class="metric-label">Test types</div><div class="metric-value" id="m-types">&#8212;</div><div class="metric-sub">unique assays</div></div>
   </div>
 
   <div class="toolbar">
@@ -94,26 +94,24 @@
       <button class="tab" onclick="showPanel('upload',this)">Manual upload</button>
     </div>
     <select id="year-select" onchange="loadData()" title="Year"></select>
-    <select id="instrument-select" onchange="loadData();toggleRenameBtn()" title="Instrument">
+    <select id="instrument-select" onchange="onInstrumentChange()" title="Instrument">
       <option value="all">All instruments</option>
     </select>
-    <button class="btn" id="rename-btn" onclick="renameInstrument()" title="Rename selected instrument" style="display:none">&#9998; Rename</button>
-    <button class="btn" onclick="loadData()">&#8635; Refresh</button>
-    <button class="btn" id="push-btn" onclick="triggerPush()" title="Trigger instrument PC to push latest data to cloud">&#8593; Push from instrument</button>
+    <button class="btn" id="rename-btn" onclick="renameInstrument()" style="display:none">&#9998; Rename</button>
+    <button class="btn" onclick="init()">&#8635; Refresh</button>
+    <button class="btn" id="push-btn" onclick="triggerPush()">&#8593; Push from instrument</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
   </div>
 
   <div id="panel-total" class="panel active">
-    <p class="panel-title">All test results — monthly counts by test name</p>
+    <p class="panel-title">All test results &#8212; monthly counts by test name</p>
     <div class="table-wrap"><table><thead id="thead-total"></thead><tbody id="tbody-total"><tr><td colspan="14" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr></tbody></table></div>
   </div>
-
   <div id="panel-elevated" class="panel">
-    <p class="panel-title">Elevated tests — excluding -I-20 and -R result codes</p>
+    <p class="panel-title">Elevated tests &#8212; excluding -I-20 and -R result codes</p>
     <div class="table-wrap"><table><thead id="thead-elevated"></thead><tbody id="tbody-elevated"></tbody></table></div>
   </div>
-
   <div id="panel-chart" class="panel">
     <div class="chart-card">
       <div class="legend">
@@ -123,10 +121,10 @@
       <div style="position:relative;height:300px"><canvas id="trendChart"></canvas></div>
     </div>
   </div>
-
   <div id="panel-upload" class="panel">
-    <p class="panel-title">Manually upload a CSV file exported from an instrument dashboard</p>
-    <div class="upload-zone" id="drop-zone" onclick="document.getElementById('csv-input').click()"
+    <p class="panel-title">Upload CSV files exported from instrument dashboards</p>
+    <div class="upload-zone" id="drop-zone"
+         onclick="document.getElementById('csv-input').click()"
          ondragover="event.preventDefault();this.classList.add('drag')"
          ondragleave="this.classList.remove('drag')"
          ondrop="handleDrop(event)">
@@ -149,7 +147,10 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 const curMonth = new Date().getMonth();
 const curYear  = new Date().getFullYear();
 let chartInst = null;
+window._instruments = [];
+window._instrIdCache = {};
 
+// ── Helpers ───────────────────────────────────────────────────
 function setStatus(state, text) {
   document.getElementById('status-dot').className = 'dot ' + state;
   document.getElementById('status-text').textContent = text;
@@ -158,22 +159,18 @@ function showError(msg) {
   const b = document.getElementById('error-banner');
   b.textContent = '⚠ ' + msg; b.style.display = 'block';
 }
-function clearError() { document.getElementById('error-banner').style.display = 'none'; }
+function clearError() {
+  document.getElementById('error-banner').style.display = 'none';
+}
 
-// Call a Supabase PostgreSQL function (RPC)
-async function sbRpc(fnName, params = {}) {
-  const { data, error } = await _sb.rpc(fnName, params);
+// ── Supabase calls ────────────────────────────────────────────
+async function sbRpc(fn, params = {}) {
+  const { data, error } = await _sb.rpc(fn, params);
   if (error) throw new Error(JSON.stringify(error));
   return data;
 }
-
-// Direct table query (used for instruments only)
-async function sbQuery(table, params) {
+async function sbFrom(table, params = {}) {
   let q = _sb.from(table).select(params.select || '*');
-  Object.entries(params).forEach(([k, v]) => {
-    if (k === 'select' || k === 'order' || !v || v === '') return;
-    if (typeof v === 'string' && v.startsWith('eq.')) q = q.eq(k, v.slice(3));
-  });
   if (params.order) {
     const [col, dir] = params.order.split('.');
     q = q.order(col, { ascending: dir !== 'desc' });
@@ -183,20 +180,24 @@ async function sbQuery(table, params) {
   return data;
 }
 
+// ── Init ──────────────────────────────────────────────────────
 async function init() {
+  setStatus('loading', 'Connecting...');
+  clearError();
   try {
-    // Load years
-    const years = await sbQuery('test_results', { select: 'year', order: 'year.desc' });
-    const uniqueYears = [...new Set(years.map(r => r.year))];
+    // Load years via RPC function
+    const yearsData = await sbRpc('get_available_years', {});
+    const uniqueYears = (yearsData || []).map(r => r.year);
+
     const sel = document.getElementById('year-select');
     sel.innerHTML = '';
     if (uniqueYears.length === 0) {
       const o = document.createElement('option');
       o.value = ''; o.textContent = 'No data yet';
       sel.appendChild(o);
-      setStatus('', 'No data yet — use Manual upload to add data');
+      setStatus('', 'No data — use Manual upload tab');
       document.getElementById('tbody-total').innerHTML =
-        '<tr><td colspan="14" style="text-align:center;padding:2rem;color:var(--muted)">No data yet. Use the Manual upload tab to upload a CSV file.</td></tr>';
+        '<tr><td colspan="14" style="text-align:center;padding:2rem;color:var(--muted)">No data yet. Use the Manual upload tab.</td></tr>';
       return;
     }
     uniqueYears.forEach(y => {
@@ -205,54 +206,49 @@ async function init() {
       if (y === curYear) o.selected = true;
       sel.appendChild(o);
     });
-    if (!sel.value && uniqueYears.length) sel.value = uniqueYears[0];
+    if (!sel.value) sel.value = uniqueYears[0];
 
-    // Load instruments from normalised table
-    const instrs = await sbQuery('instruments', { select: 'id,hostname,display_name', order: 'display_name' });
+    // Load instruments
+    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name', order: 'display_name.asc' });
+    window._instruments = instrs || [];
     const isel = document.getElementById('instrument-select');
     isel.innerHTML = '<option value="all">All instruments</option>';
-    instrs.forEach(instr => {
+    window._instruments.forEach(instr => {
       const o = document.createElement('option');
       o.value = instr.id; o.textContent = instr.display_name;
-      o.dataset.hostname = instr.hostname;
       isel.appendChild(o);
     });
-    window._instruments = instrs;
-    document.getElementById('m-instruments').textContent = instrs.length;
+    document.getElementById('m-instruments').textContent = window._instruments.length;
+
     await loadData();
   } catch(e) {
     setStatus('error', 'Connection error');
-    showError('Could not connect to database: ' + e.message);
+    showError('Could not connect: ' + e.message);
   }
 }
 
+// ── Load data ─────────────────────────────────────────────────
 async function loadData() {
   const year = document.getElementById('year-select').value;
-  if (!year || year === '') return; // no data yet, nothing to load
-  setStatus('loading', 'Fetching from cloud...');
-  clearError();
+  if (!year) return;
   const instr = document.getElementById('instrument-select').value;
   document.getElementById('year-badge').textContent = year;
+  setStatus('loading', 'Fetching from cloud...');
+  clearError();
 
   try {
-    // Call Supabase function -- all logic lives in the DB
     const fnParams = { p_year: parseInt(year) };
     if (instr !== 'all') fnParams.p_instrument_id = parseInt(instr);
     const rows = await sbRpc('get_monthly_report', fnParams);
 
-    // Get display name for selected instrument
-    let instrLabel = 'All instruments';
-    if (instr !== 'all' && window._instruments) {
-      const found = window._instruments.find(i => i.id == instr);
-      if (found) instrLabel = found.display_name;
-    }
+    const instrLabel = instr === 'all' ? 'All instruments'
+      : (window._instruments.find(i => i.id == instr) || {}).display_name || instr;
 
-    // Build maps from function results
     const totalMap = {}, elevMap = {};
     const testNames = new Set();
-    rows.forEach(r => {
+    (rows || []).forEach(r => {
       testNames.add(r.test_name);
-      const k = `${r.test_name}|${r.month}`;
+      const k = r.test_name + '|' + r.month;
       totalMap[k] = (totalMap[k] || 0) + r.total_count;
       elevMap[k]  = (elevMap[k]  || 0) + r.elevated_count;
     });
@@ -261,25 +257,23 @@ async function loadData() {
     const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year);
     const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year);
 
-    const totalYTD = Object.values(totalMap).reduce((a,b)=>a+b,0);
-    const elevYTD  = Object.values(elevMap).reduce((a,b)=>a+b,0);
-    document.getElementById('m-total').textContent    = totalYTD.toLocaleString();
-    document.getElementById('m-elevated').textContent = elevYTD.toLocaleString();
+    document.getElementById('m-total').textContent    = Object.values(totalMap).reduce((a,b)=>a+b,0).toLocaleString();
+    document.getElementById('m-elevated').textContent = Object.values(elevMap).reduce((a,b)=>a+b,0).toLocaleString();
     document.getElementById('m-types').textContent    = tests.length;
-    document.getElementById('subtitle').textContent   =
-      `Cloud dashboard · ${instr === 'all' ? 'All instruments' : instr} · ${year}`;
+    document.getElementById('subtitle').textContent   = 'NBS Analytics — ' + instrLabel + ' — ' + year;
 
     window._totStats  = totStats;
     window._elevStats = elevStats;
     if (document.getElementById('panel-chart').classList.contains('active')) buildChart(totStats, elevStats);
 
-    setStatus('', `Live · updated ${new Date().toLocaleTimeString()}`);
+    setStatus('', 'Live · updated ' + new Date().toLocaleTimeString());
   } catch(e) {
-    setStatus('error', 'Connection error');
+    setStatus('error', 'Error');
     showError('Could not load data: ' + e.message);
   }
 }
 
+// ── Build table ───────────────────────────────────────────────
 function buildTable(theadId, tbodyId, tests, dataMap, year) {
   const thead = document.getElementById(theadId);
   const tbody = document.getElementById(tbodyId);
@@ -287,30 +281,31 @@ function buildTable(theadId, tbodyId, tests, dataMap, year) {
   let grandTotal = 0;
 
   let hdr = '<tr><th>Test name</th>';
-  MONTHS.forEach((m,i) => hdr += `<th${i===curMonth?' style="color:var(--blue)"':''}>${m}</th>`);
+  MONTHS.forEach((m,i) => hdr += '<th' + (i===curMonth?' style="color:var(--blue)"':'') + '>' + m + '</th>');
   hdr += '<th style="color:var(--text)">Total YTD</th></tr>';
   thead.innerHTML = hdr;
 
   let rows = '';
   tests.forEach(name => {
-    const months = MONTHS.map((_,i) => dataMap[`${name}|${i+1}`] || 0);
+    const months = MONTHS.map((_,i) => dataMap[name+'|'+(i+1)] || 0);
     const ytd = months.reduce((a,b)=>a+b,0);
     grandTotal += ytd;
-    rows += `<tr><td title="${name}">${name}</td>`;
+    rows += '<tr><td title="' + name + '">' + name + '</td>';
     months.forEach((v,i) => {
       colTotals[i] += v;
-      rows += `<td${i===curMonth?' class="cur"':''}>${v||'—'}</td>`;
+      rows += '<td' + (i===curMonth?' class="cur"':'') + '>' + (v||'—') + '</td>';
     });
-    rows += `<td style="font-weight:500">${ytd.toLocaleString()}</td></tr>`;
+    rows += '<td style="font-weight:500">' + ytd.toLocaleString() + '</td></tr>';
   });
 
   rows += '<tr class="total-row"><td>Total</td>';
-  colTotals.forEach((v,i) => rows += `<td${i===curMonth?' style="color:var(--blue)"':''}>${v.toLocaleString()}</td>`);
-  rows += `<td>${grandTotal.toLocaleString()}</td></tr>`;
+  colTotals.forEach((v,i) => rows += '<td' + (i===curMonth?' style="color:var(--blue)"':'') + '>' + v.toLocaleString() + '</td>');
+  rows += '<td>' + grandTotal.toLocaleString() + '</td></tr>';
   tbody.innerHTML = rows;
   return { colTotals, grandTotal };
 }
 
+// ── Chart ─────────────────────────────────────────────────────
 function buildChart(tot, elev) {
   if (chartInst) { chartInst.destroy(); chartInst = null; }
   const dark = matchMedia('(prefers-color-scheme:dark)').matches;
@@ -334,14 +329,44 @@ function buildChart(tot, elev) {
   });
 }
 
+// ── Panel switching ───────────────────────────────────────────
 function showPanel(name, btn) {
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('panel-'+name).classList.add('active');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
   if (btn) btn.classList.add('active');
-  if (name==='chart' && window._totStats) buildChart(window._totStats, window._elevStats);
+  if (name === 'chart' && window._totStats) buildChart(window._totStats, window._elevStats);
 }
 
+// ── Instrument dropdown change ────────────────────────────────
+function onInstrumentChange() {
+  const sel = document.getElementById('instrument-select');
+  const btn = document.getElementById('rename-btn');
+  btn.style.display = sel.value !== 'all' ? 'inline-flex' : 'none';
+  loadData();
+}
+
+// ── Rename instrument ─────────────────────────────────────────
+async function renameInstrument() {
+  const sel = document.getElementById('instrument-select');
+  const instrId = sel.value;
+  if (instrId === 'all') return;
+  const current = sel.options[sel.selectedIndex].textContent;
+  const newName = prompt('Rename "' + current + '" to:', current);
+  if (!newName || newName === current) return;
+  try {
+    const { error } = await _sb.from('instruments')
+      .update({ display_name: newName, updated_at: new Date().toISOString() })
+      .eq('id', instrId);
+    if (error) throw new Error(JSON.stringify(error));
+    alert('Renamed to "' + newName + '" successfully.');
+    await init();
+  } catch(e) {
+    alert('Rename failed: ' + e.message);
+  }
+}
+
+// ── Export CSV ────────────────────────────────────────────────
 function exportCSV() {
   const active = document.querySelector('.panel.active');
   const table  = active ? active.querySelector('table') : null;
@@ -349,16 +374,47 @@ function exportCSV() {
   const bom = '﻿';
   let csv = '';
   table.querySelectorAll('tr').forEach(row => {
-    csv += [...row.querySelectorAll('th,td')].map(c=>'"'+c.innerText.replace(/\n/g,' ').replace(/"/g,'""')+'"').join(',') + '\r\n';
+    csv += [...row.querySelectorAll('th,td')]
+      .map(c => '"' + c.innerText.replace(/
+/g,' ').replace(/"/g,'""') + '"')
+      .join(',') + '
+';
   });
   const a = document.createElement('a');
-  const yr = document.getElementById('year-select').value;
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(bom + csv);
-  a.download = `lifecycle_cloud_${yr}.csv`;
+  a.download = 'nbs_analytics_' + document.getElementById('year-select').value + '.csv';
   a.click();
 }
 
-// Manual CSV upload
+// ── Push from instrument (webhook) ────────────────────────────
+async function triggerPush() {
+  const webhookUrl = localStorage.getItem('webhookUrl') ||
+    prompt('Enter instrument PC webhook URL:
+(e.g. http://DESKTOP-75E57AU:5001/push)
+
+Saved for future use.');
+  if (!webhookUrl) return;
+  localStorage.setItem('webhookUrl', webhookUrl);
+  const btn = document.getElementById('push-btn');
+  btn.textContent = 'Pushing...';
+  btn.disabled = true;
+  try {
+    await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
+    btn.textContent = 'Push sent! Refreshing in 30s...';
+    setTimeout(async () => {
+      await init();
+      btn.textContent = '↑ Push from instrument';
+      btn.disabled = false;
+    }, 30000);
+  } catch(e) {
+    btn.textContent = '↑ Push from instrument';
+    btn.disabled = false;
+    alert('Could not reach instrument at:
+' + webhookUrl);
+  }
+}
+
+// ── CSV Upload ────────────────────────────────────────────────
 function handleDrop(e) {
   e.preventDefault();
   document.getElementById('drop-zone').classList.remove('drag');
@@ -366,56 +422,37 @@ function handleDrop(e) {
 }
 
 function parseFilename(filename) {
-  // Extract instrument name and year from filename
-  // Handles formats like:
-  //   Combined_Annual_Report_Soetomo GSP 1_2026 (1).csv
-  //   Combined_Annual_Report_Soetomo_GSP_2_2026.csv
-  let name = filename.replace(/\.csv$/i,'');
-
-  // Remove prefix
-  name = name.replace(/Combined_Annual_Report_/i,'').trim();
-
-  // Remove copy indicators like (1), (2), - Copy etc anywhere in name
-  name = name.replace(/\s*\(\d+\)\s*/g, '');
-  name = name.replace(/\s*-\s*copy\s*/gi, '');
-  name = name.trim();
-
-  // Extract 4-digit year (last occurrence)
+  let name = filename.replace(/\.csv$/i, '');
+  name = name.replace(/Combined_Annual_Report_/i, '').trim();
+  name = name.replace(/\s*\(\d+\)\s*/g, '').replace(/\s*-\s*copy\s*/gi, '').trim();
   const yearMatches = [...name.matchAll(/(\d{4})/g)];
   const year = yearMatches.length ? parseInt(yearMatches[yearMatches.length-1][1]) : curYear;
-
-  // Remove year from name
   name = name.replace(/[_\s]*\d{4}[_\s]*/g, '').trim();
-
-  // Clean up: replace multiple underscores/spaces with single space
-  let instr = name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
-
+  const instr = name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
   return { instr, year };
 }
 
 function parseCSV(text) {
-  const lines = text.split(/\r?\n/);
-  const totalMap = {};
-  const elevMap  = {};
+  const lines = text.split(/
+?
+/);
+  const totalMap = {}, elevMap = {};
   let section = null;
-
   lines.forEach(raw => {
-    const line = raw.replace(/"/g,'').trim();
+    const line = raw.replace(/"/g, '').trim();
     if (!line || line.startsWith('-')) return;
-    if (line.includes('TOTAL TESTS'))       { section = 'total';    return; }
-    if (line.includes('ELEVATED'))          { section = 'elevated'; return; }
-    if (line.startsWith('Test name'))       return;
+    if (line.includes('TOTAL TESTS'))        { section = 'total';    return; }
+    if (line.includes('ELEVATED'))           { section = 'elevated'; return; }
+    if (line.startsWith('Test name'))        return;
     if (line.startsWith('Changed database')) return;
     if (!section) return;
-
-    const cols = line.split(',').map(c=>c.trim());
+    const cols = line.split(',').map(c => c.trim());
     const testName = cols[0];
     if (!testName || testName === 'Total' || testName === ' ') return;
-
     for (let m = 0; m < 12; m++) {
       const count = parseInt(cols[m+1]) || 0;
       if (count > 0) {
-        const key = `${testName}|${m+1}`;
+        const key = testName + '|' + (m+1);
         if (section === 'total')    totalMap[key] = (totalMap[key]||0) + count;
         if (section === 'elevated') elevMap[key]  = (elevMap[key] ||0) + count;
       }
@@ -424,203 +461,90 @@ function parseCSV(text) {
   return { totalMap, elevMap };
 }
 
-async function pushRows(instrName, yearVal, totalMap, elevMap, statusEl, fileLabel) {
-  const allKeys = new Set([...Object.keys(totalMap), ...Object.keys(elevMap)]);
-  const rows = [];
-  const now = new Date().toISOString();
-  allKeys.forEach(key => {
-    const [testName, monthStr] = key.split('|');
-    // Find or create instrument by display name
-    if (!window._instrIdCache) window._instrIdCache = {};
-    if (!window._instrIdCache[instrName]) {
-      const found = window._instruments && window._instruments.find(i => i.display_name === instrName);
-      if (found) {
-        window._instrIdCache[instrName] = found.id;
-      } else {
-        // Register as new instrument using display name as both hostname and display_name
-        const { data: newInstr, error: iErr } = await _sb.from('instruments')
-          .upsert({ hostname: instrName, display_name: instrName }, { onConflict: 'hostname' })
-          .select('id').single();
-        if (iErr) throw new Error('Could not register instrument: ' + JSON.stringify(iErr));
-        window._instrIdCache[instrName] = newInstr.id;
-        window._instruments = window._instruments || [];
-        window._instruments.push({ id: newInstr.id, hostname: instrName, display_name: instrName });
-      }
-    }
-    rows.push({
-      instrument_id:  window._instrIdCache[instrName],
-      test_name:      testName,
-      year:           yearVal,
-      month:          parseInt(monthStr),
-      total_count:    totalMap[key] || 0,
-      elevated_count: elevMap[key]  || 0,
-      pushed_at:      now
-    });
-  });
-
-  if (rows.length === 0) {
-    statusEl.innerHTML += `<div style="color:orange">⚠ ${fileLabel}: No data found.</div>`;
-    return false;
+async function getOrCreateInstrumentId(instrName) {
+  if (window._instrIdCache[instrName]) return window._instrIdCache[instrName];
+  const found = window._instruments.find(i => i.display_name === instrName);
+  if (found) {
+    window._instrIdCache[instrName] = found.id;
+    return found.id;
   }
-
-  for (let i = 0; i < rows.length; i += 100) {
-    const chunk = rows.slice(i, i+100);
-    const { error: upErr } = await _sb.from('test_results').upsert(chunk, {
-      onConflict: 'instrument,test_name,year,month',
-      ignoreDuplicates: false
-    });
-    if (upErr) throw new Error(JSON.stringify(upErr));
-  }
-  statusEl.innerHTML += `<div style="color:green">✓ ${instrName} (${yearVal}): ${rows.length} rows uploaded.</div>`;
-  return true;
+  const { data, error } = await _sb.from('instruments')
+    .upsert({ hostname: instrName, display_name: instrName }, { onConflict: 'hostname' })
+    .select('id').single();
+  if (error) throw new Error('Could not register instrument: ' + JSON.stringify(error));
+  window._instrIdCache[instrName] = data.id;
+  window._instruments.push({ id: data.id, hostname: instrName, display_name: instrName });
+  return data.id;
 }
 
 async function handleFiles(files) {
   if (!files || files.length === 0) return;
   const status = document.getElementById('upload-status');
-  status.innerHTML = `Processing ${files.length} file(s)...<br>`;
-
+  status.innerHTML = 'Processing ' + files.length + ' file(s)...<br>';
   let anySuccess = false;
+
   for (const file of Array.from(files)) {
     if (!file.name.endsWith('.csv')) {
-      status.innerHTML += `<div style="color:orange">⚠ Skipped ${file.name} (not a CSV)</div>`;
+      status.innerHTML += '<div style="color:orange">⚠ Skipped ' + file.name + ' (not a CSV)</div>';
       continue;
     }
     try {
       const { instr: autoInstr, year: autoYear } = parseFilename(file.name);
-          // Show confirmation with auto-detected values — user can edit if wrong
-      const confirmed = confirm(`Upload "${file.name}"?\n\nInstrument: ${autoInstr}\nYear: ${autoYear}\n\nClick OK to confirm or Cancel to skip.\n\n(To change the instrument name, click Cancel and rename the file.)`)
-      if (!confirmed) { status.innerHTML += `<div style="color:gray">— ${file.name}: skipped.</div>`; continue; }
-      const instrName = autoInstr;
-      const yearVal = autoYear;
+      const confirmed = confirm('Upload "' + file.name + '"?
+
+Instrument: ' + autoInstr + '
+Year: ' + autoYear + '
+
+Click OK to confirm or Cancel to skip.');
+      if (!confirmed) { status.innerHTML += '<div style="color:gray">— ' + file.name + ': skipped.</div>'; continue; }
 
       const text = await file.text();
       const { totalMap, elevMap } = parseCSV(text);
-      const ok = await pushRows(instrName, yearVal, totalMap, elevMap, status, file.name);
-      if (ok) anySuccess = true;
+      const instrId = await getOrCreateInstrumentId(autoInstr);
+
+      const allKeys = new Set([...Object.keys(totalMap), ...Object.keys(elevMap)]);
+      const rows = [];
+      const now = new Date().toISOString();
+      allKeys.forEach(key => {
+        const [testName, monthStr] = key.split('|');
+        rows.push({
+          instrument_id:  instrId,
+          test_name:      testName,
+          year:           autoYear,
+          month:          parseInt(monthStr),
+          total_count:    totalMap[key] || 0,
+          elevated_count: elevMap[key]  || 0,
+          pushed_at:      now
+        });
+      });
+
+      if (rows.length === 0) {
+        status.innerHTML += '<div style="color:orange">⚠ ' + file.name + ': No data found.</div>';
+        continue;
+      }
+
+      for (let i = 0; i < rows.length; i += 100) {
+        const chunk = rows.slice(i, i+100);
+        const { error } = await _sb.from('test_results').upsert(chunk, {
+          onConflict: 'instrument_id,test_name,year,month',
+          ignoreDuplicates: false
+        });
+        if (error) throw new Error(JSON.stringify(error));
+      }
+      status.innerHTML += '<div style="color:green">✓ ' + autoInstr + ' (' + autoYear + '): ' + rows.length + ' rows uploaded.</div>';
+      anySuccess = true;
     } catch(e) {
-      status.innerHTML += `<div style="color:red">✗ ${file.name}: ${e.message}</div>`;
+      status.innerHTML += '<div style="color:red">✗ ' + file.name + ': ' + e.message + '</div>';
     }
   }
 
   if (anySuccess) {
-    status.innerHTML += `<div style="margin-top:8px;color:var(--muted)">Refreshing dashboard...</div>`;
-    await // Toggle rename button visibility
-function toggleRenameBtn() {
-  const sel = document.getElementById('instrument-select');
-  const btn = document.getElementById('rename-btn');
-  btn.style.display = sel.value !== 'all' ? 'inline-flex' : 'none';
-}
-
-// Rename instrument display name
-async function renameInstrument() {
-  const sel = document.getElementById('instrument-select');
-  const instrId = sel.value;
-  if (instrId === 'all') return;
-  const current = sel.options[sel.selectedIndex].textContent;
-  const newName = prompt(`Rename "${current}" to:`, current);
-  if (!newName || newName === current) return;
-
-  try {
-    const { error } = await _sb.from('instruments')
-      .update({ display_name: newName, updated_at: new Date().toISOString() })
-      .eq('id', instrId);
-    if (error) throw new Error(JSON.stringify(error));
-    alert(`Renamed to "${newName}" successfully.`);
+    status.innerHTML += '<div style="margin-top:8px;color:var(--muted)">Refreshing dashboard...</div>';
     await init();
-  } catch(e) {
-    alert('Rename failed: ' + e.message);
   }
 }
 
-// Webhook push trigger
-async function triggerPush() {
-  const webhookUrl = localStorage.getItem('webhookUrl') ||
-    prompt('Enter instrument PC webhook URL:\n(e.g. http://DESKTOP-75E57AU:5001/push)\n\nThis is saved for future use.');
-  if (!webhookUrl) return;
-  localStorage.setItem('webhookUrl', webhookUrl);
-
-  const btn = document.getElementById('push-btn');
-  btn.textContent = 'Pushing...';
-  btn.disabled = true;
-
-  try {
-    const resp = await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
-    btn.textContent = 'Push sent! Refreshing in 30s...';
-    // Wait 30 seconds for push to complete then reload
-    setTimeout(async () => {
-      await init();
-      btn.textContent = '↑ Push from instrument';
-      btn.disabled = false;
-    }, 30000);
-  } catch(e) {
-    btn.textContent = '↑ Push from instrument';
-    btn.disabled = false;
-    alert('Could not reach instrument PC at:\n' + webhookUrl +
-      '\n\nMake sure:\n1. The instrument PC is on\n2. Webhook-Listener.ps1 is running\n3. Port 5001 is open in the firewall');
-  }
-}
-
-init();
-  }
-}
-
-// Toggle rename button visibility
-function toggleRenameBtn() {
-  const sel = document.getElementById('instrument-select');
-  const btn = document.getElementById('rename-btn');
-  btn.style.display = sel.value !== 'all' ? 'inline-flex' : 'none';
-}
-
-// Rename instrument display name
-async function renameInstrument() {
-  const sel = document.getElementById('instrument-select');
-  const instrId = sel.value;
-  if (instrId === 'all') return;
-  const current = sel.options[sel.selectedIndex].textContent;
-  const newName = prompt(`Rename "${current}" to:`, current);
-  if (!newName || newName === current) return;
-
-  try {
-    const { error } = await _sb.from('instruments')
-      .update({ display_name: newName, updated_at: new Date().toISOString() })
-      .eq('id', instrId);
-    if (error) throw new Error(JSON.stringify(error));
-    alert(`Renamed to "${newName}" successfully.`);
-    await init();
-  } catch(e) {
-    alert('Rename failed: ' + e.message);
-  }
-}
-
-// Webhook push trigger
-async function triggerPush() {
-  const webhookUrl = localStorage.getItem('webhookUrl') ||
-    prompt('Enter instrument PC webhook URL:\n(e.g. http://DESKTOP-75E57AU:5001/push)\n\nThis is saved for future use.');
-  if (!webhookUrl) return;
-  localStorage.setItem('webhookUrl', webhookUrl);
-
-  const btn = document.getElementById('push-btn');
-  btn.textContent = 'Pushing...';
-  btn.disabled = true;
-
-  try {
-    const resp = await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
-    btn.textContent = 'Push sent! Refreshing in 30s...';
-    // Wait 30 seconds for push to complete then reload
-    setTimeout(async () => {
-      await init();
-      btn.textContent = '↑ Push from instrument';
-      btn.disabled = false;
-    }, 30000);
-  } catch(e) {
-    btn.textContent = '↑ Push from instrument';
-    btn.disabled = false;
-    alert('Could not reach instrument PC at:\n' + webhookUrl +
-      '\n\nMake sure:\n1. The instrument PC is on\n2. Webhook-Listener.ps1 is running\n3. Port 5001 is open in the firewall');
-  }
-}
-
+// ── Start ─────────────────────────────────────────────────────
 init();
 </script>
 </body>
