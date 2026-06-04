@@ -352,18 +352,29 @@ function handleDrop(e) {
 
 function parseFilename(filename) {
   // Extract instrument name and year from filename
-  // e.g. "Combined_Annual_Report_Soetomo_GSP_2_2026.csv" -> {instr:"Soetomo GSP 2", year:2026}
+  // Handles formats like:
+  //   Combined_Annual_Report_Soetomo GSP 1_2026 (1).csv
+  //   Combined_Annual_Report_Soetomo_GSP_2_2026.csv
   let name = filename.replace(/\.csv$/i,'');
+
+  // Remove prefix
   name = name.replace(/Combined_Annual_Report_/i,'').trim();
-  // Extract trailing year
-  const yearMatch = name.match(/(\d{4})/);
-  const year = yearMatch ? parseInt(yearMatch[1]) : curYear;
-  // Remove year and trailing numbers/parentheses, replace underscores with spaces
-  let instr = name
-    .replace(/[_\s]*\(\d+\)[_\s]*/g, '')  // remove (1), (2) etc
-    .replace(/[_\s]*\d{4}[_\s]*/g, '')      // remove year
-    .replace(/_+/g, ' ')                        // underscores to spaces
-    .trim();
+
+  // Remove copy indicators like (1), (2), - Copy etc anywhere in name
+  name = name.replace(/\s*\(\d+\)\s*/g, '');
+  name = name.replace(/\s*-\s*copy\s*/gi, '');
+  name = name.trim();
+
+  // Extract 4-digit year (last occurrence)
+  const yearMatches = [...name.matchAll(/(\d{4})/g)];
+  const year = yearMatches.length ? parseInt(yearMatches[yearMatches.length-1][1]) : curYear;
+
+  // Remove year from name
+  name = name.replace(/[_\s]*\d{4}[_\s]*/g, '').trim();
+
+  // Clean up: replace multiple underscores/spaces with single space
+  let instr = name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+
   return { instr, year };
 }
 
