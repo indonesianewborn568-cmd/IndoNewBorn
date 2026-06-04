@@ -434,7 +434,8 @@ async function pushRows(instrName, yearVal, totalMap, elevMap, statusEl, fileLab
   for (let i = 0; i < rows.length; i += 100) {
     const chunk = rows.slice(i, i+100);
     const { error: upErr } = await _sb.from('test_results').upsert(chunk, {
-      onConflict: 'instrument,test_name,year,month'
+      onConflict: 'instrument,test_name,year,month',
+      ignoreDuplicates: false
     });
     if (upErr) throw new Error(JSON.stringify(upErr));
   }
