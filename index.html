@@ -68,8 +68,8 @@
 <div class="container">
   <div class="header">
     <div>
-      <h1>LifeCycle — annual test report</h1>
-      <div class="header-sub" id="subtitle">Cloud dashboard — all instruments</div>
+      <h1>NBS Analytics — annual test count</h1>
+      <div class="header-sub" id="subtitle">NBS Analytics — all instruments</div>
       <div class="status"><span class="dot loading" id="status-dot"></span><span id="status-text">Loading...</span></div>
     </div>
     <div style="text-align:right">
@@ -94,9 +94,10 @@
       <button class="tab" onclick="showPanel('upload',this)">Manual upload</button>
     </div>
     <select id="year-select" onchange="loadData()" title="Year"></select>
-    <select id="instrument-select" onchange="loadData()" title="Instrument">
+    <select id="instrument-select" onchange="loadData();toggleRenameBtn()" title="Instrument">
       <option value="all">All instruments</option>
     </select>
+    <button class="btn" id="rename-btn" onclick="renameInstrument()" title="Rename selected instrument" style="display:none">&#9998; Rename</button>
     <button class="btn" onclick="loadData()">&#8635; Refresh</button>
     <button class="btn" id="push-btn" onclick="triggerPush()" title="Trigger instrument PC to push latest data to cloud">&#8593; Push from instrument</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
@@ -159,14 +160,20 @@ function showError(msg) {
 }
 function clearError() { document.getElementById('error-banner').style.display = 'none'; }
 
+// Call a Supabase PostgreSQL function (RPC)
+async function sbRpc(fnName, params = {}) {
+  const { data, error } = await _sb.rpc(fnName, params);
+  if (error) throw new Error(JSON.stringify(error));
+  return data;
+}
+
+// Direct table query (used for instruments only)
 async function sbQuery(table, params) {
   let q = _sb.from(table).select(params.select || '*');
-  // Apply filters
   Object.entries(params).forEach(([k, v]) => {
     if (k === 'select' || k === 'order' || !v || v === '') return;
-    if (v.startsWith('eq.'))  q = q.eq(k, v.slice(3));
+    if (typeof v === 'string' && v.startsWith('eq.')) q = q.eq(k, v.slice(3));
   });
-  // Apply ordering
   if (params.order) {
     const [col, dir] = params.order.split('.');
     q = q.order(col, { ascending: dir !== 'desc' });
@@ -200,18 +207,18 @@ async function init() {
     });
     if (!sel.value && uniqueYears.length) sel.value = uniqueYears[0];
 
-    // Load instruments
-    const instrs = await sbQuery('test_results', { select: 'instrument', order: 'instrument' });
-    const uniqueInstrs = [...new Set(instrs.map(r => r.instrument))];
+    // Load instruments from normalised table
+    const instrs = await sbQuery('instruments', { select: 'id,hostname,display_name', order: 'display_name' });
     const isel = document.getElementById('instrument-select');
     isel.innerHTML = '<option value="all">All instruments</option>';
-    uniqueInstrs.forEach(name => {
+    instrs.forEach(instr => {
       const o = document.createElement('option');
-      o.value = name; o.textContent = name;
+      o.value = instr.id; o.textContent = instr.display_name;
+      o.dataset.hostname = instr.hostname;
       isel.appendChild(o);
     });
-
-    document.getElementById('m-instruments').textContent = uniqueInstrs.length;
+    window._instruments = instrs;
+    document.getElementById('m-instruments').textContent = instrs.length;
     await loadData();
   } catch(e) {
     setStatus('error', 'Connection error');
@@ -228,11 +235,19 @@ async function loadData() {
   document.getElementById('year-badge').textContent = year;
 
   try {
-    const params = { select: '*', year: `eq.${year}`, order: 'test_name,month' };
-    if (instr !== 'all') params.instrument = `eq.${instr}`;
-    const rows = await sbQuery('test_results', params);
+    // Call Supabase function -- all logic lives in the DB
+    const fnParams = { p_year: parseInt(year) };
+    if (instr !== 'all') fnParams.p_instrument_id = parseInt(instr);
+    const rows = await sbRpc('get_monthly_report', fnParams);
 
-    // Aggregate by test_name + month
+    // Get display name for selected instrument
+    let instrLabel = 'All instruments';
+    if (instr !== 'all' && window._instruments) {
+      const found = window._instruments.find(i => i.id == instr);
+      if (found) instrLabel = found.display_name;
+    }
+
+    // Build maps from function results
     const totalMap = {}, elevMap = {};
     const testNames = new Set();
     rows.forEach(r => {
@@ -415,8 +430,25 @@ async function pushRows(instrName, yearVal, totalMap, elevMap, statusEl, fileLab
   const now = new Date().toISOString();
   allKeys.forEach(key => {
     const [testName, monthStr] = key.split('|');
+    // Find or create instrument by display name
+    if (!window._instrIdCache) window._instrIdCache = {};
+    if (!window._instrIdCache[instrName]) {
+      const found = window._instruments && window._instruments.find(i => i.display_name === instrName);
+      if (found) {
+        window._instrIdCache[instrName] = found.id;
+      } else {
+        // Register as new instrument using display name as both hostname and display_name
+        const { data: newInstr, error: iErr } = await _sb.from('instruments')
+          .upsert({ hostname: instrName, display_name: instrName }, { onConflict: 'hostname' })
+          .select('id').single();
+        if (iErr) throw new Error('Could not register instrument: ' + JSON.stringify(iErr));
+        window._instrIdCache[instrName] = newInstr.id;
+        window._instruments = window._instruments || [];
+        window._instruments.push({ id: newInstr.id, hostname: instrName, display_name: instrName });
+      }
+    }
     rows.push({
-      instrument:     instrName,
+      instrument_id:  window._instrIdCache[instrName],
       test_name:      testName,
       year:           yearVal,
       month:          parseInt(monthStr),
@@ -473,7 +505,35 @@ async function handleFiles(files) {
 
   if (anySuccess) {
     status.innerHTML += `<div style="margin-top:8px;color:var(--muted)">Refreshing dashboard...</div>`;
-    await // Webhook push trigger
+    await // Toggle rename button visibility
+function toggleRenameBtn() {
+  const sel = document.getElementById('instrument-select');
+  const btn = document.getElementById('rename-btn');
+  btn.style.display = sel.value !== 'all' ? 'inline-flex' : 'none';
+}
+
+// Rename instrument display name
+async function renameInstrument() {
+  const sel = document.getElementById('instrument-select');
+  const instrId = sel.value;
+  if (instrId === 'all') return;
+  const current = sel.options[sel.selectedIndex].textContent;
+  const newName = prompt(`Rename "${current}" to:`, current);
+  if (!newName || newName === current) return;
+
+  try {
+    const { error } = await _sb.from('instruments')
+      .update({ display_name: newName, updated_at: new Date().toISOString() })
+      .eq('id', instrId);
+    if (error) throw new Error(JSON.stringify(error));
+    alert(`Renamed to "${newName}" successfully.`);
+    await init();
+  } catch(e) {
+    alert('Rename failed: ' + e.message);
+  }
+}
+
+// Webhook push trigger
 async function triggerPush() {
   const webhookUrl = localStorage.getItem('webhookUrl') ||
     prompt('Enter instrument PC webhook URL:\n(e.g. http://DESKTOP-75E57AU:5001/push)\n\nThis is saved for future use.');
@@ -502,6 +562,34 @@ async function triggerPush() {
 }
 
 init();
+  }
+}
+
+// Toggle rename button visibility
+function toggleRenameBtn() {
+  const sel = document.getElementById('instrument-select');
+  const btn = document.getElementById('rename-btn');
+  btn.style.display = sel.value !== 'all' ? 'inline-flex' : 'none';
+}
+
+// Rename instrument display name
+async function renameInstrument() {
+  const sel = document.getElementById('instrument-select');
+  const instrId = sel.value;
+  if (instrId === 'all') return;
+  const current = sel.options[sel.selectedIndex].textContent;
+  const newName = prompt(`Rename "${current}" to:`, current);
+  if (!newName || newName === current) return;
+
+  try {
+    const { error } = await _sb.from('instruments')
+      .update({ display_name: newName, updated_at: new Date().toISOString() })
+      .eq('id', instrId);
+    if (error) throw new Error(JSON.stringify(error));
+    alert(`Renamed to "${newName}" successfully.`);
+    await init();
+  } catch(e) {
+    alert('Rename failed: ' + e.message);
   }
 }
 
