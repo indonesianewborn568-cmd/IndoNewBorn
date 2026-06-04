@@ -456,10 +456,11 @@ async function handleFiles(files) {
     }
     try {
       const { instr: autoInstr, year: autoYear } = parseFilename(file.name);
-      const instrName = prompt(`Instrument name for "${file.name}":`, autoInstr);
-      if (!instrName) { status.innerHTML += `<div style="color:gray">— ${file.name}: skipped.</div>`; continue; }
-      const yearVal = parseInt(prompt(`Year for "${file.name}":`, autoYear));
-      if (!yearVal)   { status.innerHTML += `<div style="color:gray">— ${file.name}: skipped.</div>`; continue; }
+          // Show confirmation with auto-detected values — user can edit if wrong
+      const confirmed = confirm(`Upload "${file.name}"?\n\nInstrument: ${autoInstr}\nYear: ${autoYear}\n\nClick OK to confirm or Cancel to skip.\n\n(To change the instrument name, click Cancel and rename the file.)`)
+      if (!confirmed) { status.innerHTML += `<div style="color:gray">— ${file.name}: skipped.</div>`; continue; }
+      const instrName = autoInstr;
+      const yearVal = autoYear;
 
       const text = await file.text();
       const { totalMap, elevMap } = parseCSV(text);
