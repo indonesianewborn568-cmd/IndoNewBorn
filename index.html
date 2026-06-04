@@ -98,6 +98,7 @@
       <option value="all">All instruments</option>
     </select>
     <button class="btn" onclick="loadData()">&#8635; Refresh</button>
+    <button class="btn" id="push-btn" onclick="triggerPush()" title="Trigger instrument PC to push latest data to cloud">&#8593; Push from instrument</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
   </div>
@@ -128,19 +129,21 @@
          ondragover="event.preventDefault();this.classList.add('drag')"
          ondragleave="this.classList.remove('drag')"
          ondrop="handleDrop(event)">
-      <input type="file" id="csv-input" accept=".csv" onchange="handleFile(this.files[0])">
+      <input type="file" id="csv-input" accept=".csv" multiple onchange="handleFiles(this.files)">
       <div style="font-size:2rem;margin-bottom:8px">&#8659;</div>
-      <div>Drop the Combined Annual Report CSV here or click to browse</div>
-      <div style="font-size:12px;margin-top:6px">Accepts the combined format with Total + Elevated sections</div>
+      <div>Drop one or more CSV files here or click to browse</div>
+      <div style="font-size:12px;margin-top:6px">Accepts combined format with Total + Elevated sections. Multiple files supported.</div>
     </div>
     <div id="upload-status" class="upload-status"></div>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const SUPABASE_URL = "https://ngplytucjattrffxbxig.supabase.co";
 const SUPABASE_KEY = "sb_publishable_rXQ-JeJJ1Zj0aruVzRmLBg_XVGcn3dd";
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const curMonth = new Date().getMonth();
 const curYear  = new Date().getFullYear();
@@ -156,20 +159,27 @@ function showError(msg) {
 }
 function clearError() { document.getElementById('error-banner').style.display = 'none'; }
 
-async function supabase(path, params) {
-  const qs = new URLSearchParams(params).toString();
-  const url = `${SUPABASE_URL}/rest/v1/${path}${qs ? '?' + qs : ''}`;
-  const resp = await fetch(url, {
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+async function sbQuery(table, params) {
+  let q = _sb.from(table).select(params.select || '*');
+  // Apply filters
+  Object.entries(params).forEach(([k, v]) => {
+    if (k === 'select' || k === 'order' || !v || v === '') return;
+    if (v.startsWith('eq.'))  q = q.eq(k, v.slice(3));
   });
-  if (!resp.ok) throw new Error(await resp.text());
-  return resp.json();
+  // Apply ordering
+  if (params.order) {
+    const [col, dir] = params.order.split('.');
+    q = q.order(col, { ascending: dir !== 'desc' });
+  }
+  const { data, error } = await q;
+  if (error) throw new Error(JSON.stringify(error));
+  return data;
 }
 
 async function init() {
   try {
     // Load years
-    const years = await supabase('test_results', { select: 'year', order: 'year.desc' });
+    const years = await sbQuery('test_results', { select: 'year', order: 'year.desc' });
     const uniqueYears = [...new Set(years.map(r => r.year))];
     const sel = document.getElementById('year-select');
     sel.innerHTML = '';
@@ -191,7 +201,7 @@ async function init() {
     if (!sel.value && uniqueYears.length) sel.value = uniqueYears[0];
 
     // Load instruments
-    const instrs = await supabase('test_results', { select: 'instrument', order: 'instrument' });
+    const instrs = await sbQuery('test_results', { select: 'instrument', order: 'instrument' });
     const uniqueInstrs = [...new Set(instrs.map(r => r.instrument))];
     const isel = document.getElementById('instrument-select');
     isel.innerHTML = '<option value="all">All instruments</option>';
@@ -210,16 +220,17 @@ async function init() {
 }
 
 async function loadData() {
+  const year = document.getElementById('year-select').value;
+  if (!year || year === '') return; // no data yet, nothing to load
   setStatus('loading', 'Fetching from cloud...');
   clearError();
-  const year = document.getElementById('year-select').value;
   const instr = document.getElementById('instrument-select').value;
   document.getElementById('year-badge').textContent = year;
 
   try {
     const params = { select: '*', year: `eq.${year}`, order: 'test_name,month' };
     if (instr !== 'all') params.instrument = `eq.${instr}`;
-    const rows = await supabase('test_results', params);
+    const rows = await sbQuery('test_results', params);
 
     // Aggregate by test_name + month
     const totalMap = {}, elevMap = {};
@@ -336,26 +347,39 @@ function exportCSV() {
 function handleDrop(e) {
   e.preventDefault();
   document.getElementById('drop-zone').classList.remove('drag');
-  const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
+  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+}
+
+function parseFilename(filename) {
+  // Extract instrument name and year from filename
+  // e.g. "Combined_Annual_Report_Soetomo_GSP_2_2026.csv" -> {instr:"Soetomo GSP 2", year:2026}
+  let name = filename.replace(/\.csv$/i,'');
+  name = name.replace(/Combined_Annual_Report_/i,'').trim();
+  // Extract trailing year
+  const yearMatch = name.match(/(\d{4})/);
+  const year = yearMatch ? parseInt(yearMatch[1]) : curYear;
+  // Remove year and trailing numbers/parentheses, replace underscores with spaces
+  let instr = name
+    .replace(/[_\s]*\(\d+\)[_\s]*/g, '')  // remove (1), (2) etc
+    .replace(/[_\s]*\d{4}[_\s]*/g, '')      // remove year
+    .replace(/_+/g, ' ')                        // underscores to spaces
+    .trim();
+  return { instr, year };
 }
 
 function parseCSV(text) {
-  // Parse the combined annual report CSV format:
-  // Has two sections: TOTAL TESTS and ELEVATED RESULTS
-  // Each section has header rows, separator rows, and data rows
   const lines = text.split(/\r?\n/);
-  const totalMap = {};   // test_name|month -> count
+  const totalMap = {};
   const elevMap  = {};
-  let section = null;    // 'total' or 'elevated'
+  let section = null;
 
   lines.forEach(raw => {
     const line = raw.replace(/"/g,'').trim();
     if (!line || line.startsWith('-')) return;
-    if (line.includes('TOTAL TESTS'))    { section = 'total';    return; }
-    if (line.includes('ELEVATED'))       { section = 'elevated'; return; }
-    if (line.startsWith('Test name'))    return; // header row
-    if (line.startsWith('Changed database')) return; // sqlcmd artifact
+    if (line.includes('TOTAL TESTS'))       { section = 'total';    return; }
+    if (line.includes('ELEVATED'))          { section = 'elevated'; return; }
+    if (line.startsWith('Test name'))       return;
+    if (line.startsWith('Changed database')) return;
     if (!section) return;
 
     const cols = line.split(',').map(c=>c.trim());
@@ -374,29 +398,7 @@ function parseCSV(text) {
   return { totalMap, elevMap };
 }
 
-async function handleFile(file) {
-  if (!file) return;
-  const status = document.getElementById('upload-status');
-  status.textContent = 'Reading file...';
-
-  // Auto-detect instrument name and year from filename
-  // e.g. "Combined_Annual_Report_Soetomo_GSP_2_2026.csv"
-  //   -> instrument: "Soetomo GSP 2", year: 2026
-  let autoInstr = file.name.replace(/\.csv$/i,'');
-  autoInstr = autoInstr.replace(/Combined_Annual_Report_/i,'').trim();
-  const yearMatch = autoInstr.match(/(\d{4})$/);
-  let autoYear = yearMatch ? parseInt(yearMatch[1]) : curYear;
-  autoInstr = autoInstr.replace(/_?(\d{4})$/, '').replace(/_/g,' ').trim();
-
-  const instrName = prompt('Instrument name (auto-detected from filename):', autoInstr) || autoInstr;
-  if (!instrName) { status.textContent = 'Upload cancelled.'; return; }
-  const yearVal = parseInt(prompt('Year (auto-detected from filename):', autoYear)) || autoYear;
-  if (!yearVal) { status.textContent = 'Upload cancelled.'; return; }
-
-  const text = await file.text();
-  const { totalMap, elevMap } = parseCSV(text);
-
-  // Merge into rows by test+month
+async function pushRows(instrName, yearVal, totalMap, elevMap, statusEl, fileLabel) {
   const allKeys = new Set([...Object.keys(totalMap), ...Object.keys(elevMap)]);
   const rows = [];
   const now = new Date().toISOString();
@@ -414,29 +416,107 @@ async function handleFile(file) {
   });
 
   if (rows.length === 0) {
-    status.textContent = 'No data found in file. Check the file format.';
-    return;
+    statusEl.innerHTML += `<div style="color:orange">⚠ ${fileLabel}: No data found.</div>`;
+    return false;
   }
 
-  status.textContent = `Uploading ${rows.length} rows for ${instrName} (${yearVal})...`;
-  try {
-    // Push in batches of 100
-    for (let i = 0; i < rows.length; i += 100) {
-      const chunk = rows.slice(i, i+100);
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/test_results`, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
-          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
-        },
-        body: JSON.stringify(chunk)
-      });
-      if (!resp.ok) throw new Error(await resp.text());
+  for (let i = 0; i < rows.length; i += 100) {
+    const chunk = rows.slice(i, i+100);
+    const { error: upErr } = await _sb.from('test_results').upsert(chunk, {
+      onConflict: 'instrument,test_name,year,month'
+    });
+    if (upErr) throw new Error(JSON.stringify(upErr));
+  }
+  statusEl.innerHTML += `<div style="color:green">✓ ${instrName} (${yearVal}): ${rows.length} rows uploaded.</div>`;
+  return true;
+}
+
+async function handleFiles(files) {
+  if (!files || files.length === 0) return;
+  const status = document.getElementById('upload-status');
+  status.innerHTML = `Processing ${files.length} file(s)...<br>`;
+
+  let anySuccess = false;
+  for (const file of Array.from(files)) {
+    if (!file.name.endsWith('.csv')) {
+      status.innerHTML += `<div style="color:orange">⚠ Skipped ${file.name} (not a CSV)</div>`;
+      continue;
     }
-    status.textContent = `✓ Uploaded ${rows.length} rows for ${instrName} (${yearVal}). Refreshing...`;
-    await loadData();
+    try {
+      const { instr: autoInstr, year: autoYear } = parseFilename(file.name);
+      const instrName = prompt(`Instrument name for "${file.name}":`, autoInstr);
+      if (!instrName) { status.innerHTML += `<div style="color:gray">— ${file.name}: skipped.</div>`; continue; }
+      const yearVal = parseInt(prompt(`Year for "${file.name}":`, autoYear));
+      if (!yearVal)   { status.innerHTML += `<div style="color:gray">— ${file.name}: skipped.</div>`; continue; }
+
+      const text = await file.text();
+      const { totalMap, elevMap } = parseCSV(text);
+      const ok = await pushRows(instrName, yearVal, totalMap, elevMap, status, file.name);
+      if (ok) anySuccess = true;
+    } catch(e) {
+      status.innerHTML += `<div style="color:red">✗ ${file.name}: ${e.message}</div>`;
+    }
+  }
+
+  if (anySuccess) {
+    status.innerHTML += `<div style="margin-top:8px;color:var(--muted)">Refreshing dashboard...</div>`;
+    await // Webhook push trigger
+async function triggerPush() {
+  const webhookUrl = localStorage.getItem('webhookUrl') ||
+    prompt('Enter instrument PC webhook URL:\n(e.g. http://DESKTOP-75E57AU:5001/push)\n\nThis is saved for future use.');
+  if (!webhookUrl) return;
+  localStorage.setItem('webhookUrl', webhookUrl);
+
+  const btn = document.getElementById('push-btn');
+  btn.textContent = 'Pushing...';
+  btn.disabled = true;
+
+  try {
+    const resp = await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
+    btn.textContent = 'Push sent! Refreshing in 30s...';
+    // Wait 30 seconds for push to complete then reload
+    setTimeout(async () => {
+      await init();
+      btn.textContent = '↑ Push from instrument';
+      btn.disabled = false;
+    }, 30000);
   } catch(e) {
-    status.textContent = 'Upload failed: ' + e.message;
+    btn.textContent = '↑ Push from instrument';
+    btn.disabled = false;
+    alert('Could not reach instrument PC at:\n' + webhookUrl +
+      '\n\nMake sure:\n1. The instrument PC is on\n2. Webhook-Listener.ps1 is running\n3. Port 5001 is open in the firewall');
+  }
+}
+
+init();
+  }
+}
+
+// Webhook push trigger
+async function triggerPush() {
+  const webhookUrl = localStorage.getItem('webhookUrl') ||
+    prompt('Enter instrument PC webhook URL:\n(e.g. http://DESKTOP-75E57AU:5001/push)\n\nThis is saved for future use.');
+  if (!webhookUrl) return;
+  localStorage.setItem('webhookUrl', webhookUrl);
+
+  const btn = document.getElementById('push-btn');
+  btn.textContent = 'Pushing...';
+  btn.disabled = true;
+
+  try {
+    const resp = await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
+    btn.textContent = 'Push sent! Refreshing in 30s...';
+    // Wait 30 seconds for push to complete then reload
+    setTimeout(async () => {
+      await init();
+      btn.textContent = '↑ Push from instrument';
+      btn.disabled = false;
+    }, 30000);
+  } catch(e) {
+    btn.textContent = '↑ Push from instrument';
+    btn.disabled = false;
+    alert('Could not reach instrument PC at:\n' + webhookUrl +
+      '\n\nMake sure:\n1. The instrument PC is on\n2. Webhook-Listener.ps1 is running\n3. Port 5001 is open in the firewall');
   }
 }
 
