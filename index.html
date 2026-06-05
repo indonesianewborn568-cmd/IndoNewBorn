@@ -103,6 +103,7 @@
     </select>
     <button class="btn" id="rename-btn" onclick="renameInstrument()" style="display:none" title="Rename selected instrument">&#9998;</button>
     <button class="btn" id="delink-btn" onclick="toggleInstrumentLink()" style="display:none"></button>
+    <button class="btn" id="show-delinked-btn" onclick="toggleShowDelinked()" style="font-size:11px;color:var(--muted)" title="Show delinked instruments for management">&#128274; Delinked</button>
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="push-btn" onclick="triggerPush()">&#8593; Push from instrument</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
@@ -238,16 +239,18 @@ async function init() {
     // Load instruments
     const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id,active', order: 'display_name.asc' });
     window._instruments = instrs || [];
+    // Active instruments only shown in dropdown and count
+    const activeInstrs = window._instruments.filter(i => i.active !== false);
     const isel = document.getElementById('instrument-select');
     isel.innerHTML = '<option value="all">All instruments</option>';
-    window._instruments.forEach(instr => {
+    activeInstrs.forEach(instr => {
       const o = document.createElement('option');
       o.value = instr.id;
-      o.textContent = instr.display_name + (instr.active === false ? ' (delinked)' : '');
+      o.textContent = instr.display_name;
       o.dataset.siteId = instr.site_id;
       isel.appendChild(o);
     });
-    document.getElementById('m-instruments').textContent = window._instruments.filter(i => i.active !== false).length;
+    document.getElementById('m-instruments').textContent = activeInstrs.length;
 
     await loadData();
   } catch(e) {
@@ -383,7 +386,7 @@ function onSiteChange() {
   // Filter instrument dropdown to show only instruments for selected site
   const isel = document.getElementById('instrument-select');
   isel.innerHTML = '<option value="all">All instruments</option>';
-  (window._instruments || []).forEach(instr => {
+  (window._instruments || []).filter(i => i.active !== false).forEach(instr => {
     if (siteId === 'all' || instr.site_id == siteId) {
       const o = document.createElement('option');
       o.value = instr.id; o.textContent = instr.display_name;
@@ -401,6 +404,7 @@ function onInstrumentChange() {
   document.getElementById('rename-btn').style.display = show ? 'inline-flex' : 'none';
   const delinkBtn = document.getElementById('delink-btn');
   if (show) {
+    // Check all instruments including inactive for delink/relink
     const instr = (window._instruments || []).find(i => i.id == sel.value);
     if (instr) {
       delinkBtn.textContent = instr.active === false ? 'Relink' : 'Delink';
@@ -450,6 +454,27 @@ async function renameSite() {
   } catch(e) {
     alert('Rename failed: ' + e.message);
   }
+}
+
+// ── Show/hide delinked instruments ───────────────────────────
+window._showDelinked = false;
+function toggleShowDelinked() {
+  window._showDelinked = !window._showDelinked;
+  const btn = document.getElementById('show-delinked-btn');
+  btn.style.color = window._showDelinked ? 'var(--blue)' : 'var(--muted)';
+  // Rebuild instrument dropdown including/excluding delinked
+  const siteId = document.getElementById('site-select').value;
+  const isel = document.getElementById('instrument-select');
+  isel.innerHTML = '<option value="all">All instruments</option>';
+  (window._instruments || []).forEach(instr => {
+    if (instr.active === false && !window._showDelinked) return;
+    if (siteId !== 'all' && instr.site_id != siteId) return;
+    const o = document.createElement('option');
+    o.value = instr.id;
+    o.textContent = instr.display_name + (instr.active === false ? ' (delinked)' : '');
+    o.dataset.siteId = instr.site_id;
+    isel.appendChild(o);
+  });
 }
 
 // ── Delink / Relink instrument ───────────────────────────────
