@@ -94,6 +94,9 @@
       <button class="tab" onclick="showPanel('upload',this)">Manual upload</button>
     </div>
     <select id="year-select" onchange="loadData()" title="Year"></select>
+    <select id="site-select" onchange="onSiteChange()" title="Site">
+      <option value="all">All sites</option>
+    </select>
     <select id="instrument-select" onchange="onInstrumentChange()" title="Instrument">
       <option value="all">All instruments</option>
     </select>
@@ -208,14 +211,26 @@ async function init() {
     });
     if (!sel.value) sel.value = uniqueYears[0];
 
+    // Load sites
+    const sitesData = await sbFrom('sites', { select: 'id,site_name', order: 'site_name.asc' });
+    window._sites = sitesData || [];
+    const ssel = document.getElementById('site-select');
+    ssel.innerHTML = '<option value="all">All sites</option>';
+    window._sites.forEach(site => {
+      const o = document.createElement('option');
+      o.value = site.id; o.textContent = site.site_name;
+      ssel.appendChild(o);
+    });
+
     // Load instruments
-    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name', order: 'display_name.asc' });
+    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id', order: 'display_name.asc' });
     window._instruments = instrs || [];
     const isel = document.getElementById('instrument-select');
     isel.innerHTML = '<option value="all">All instruments</option>';
     window._instruments.forEach(instr => {
       const o = document.createElement('option');
       o.value = instr.id; o.textContent = instr.display_name;
+      o.dataset.siteId = instr.site_id;
       isel.appendChild(o);
     });
     document.getElementById('m-instruments').textContent = window._instruments.length;
@@ -237,11 +252,16 @@ async function loadData() {
   clearError();
 
   try {
+    const site  = document.getElementById('site-select').value;
     const fnParams = { p_year: parseInt(year) };
     if (instr !== 'all') fnParams.p_instrument_id = parseInt(instr);
+    else if (site !== 'all') fnParams.p_site_id = parseInt(site);
     const rows = await sbRpc('get_monthly_report', fnParams);
 
-    const instrLabel = instr === 'all' ? 'All instruments'
+    const siteLabel = site === 'all' ? 'All sites'
+      : (window._sites || []).find(s => s.id == site)?.site_name || site;
+    const instrLabel = instr === 'all'
+      ? (site === 'all' ? 'All instruments' : siteLabel)
       : (window._instruments.find(i => i.id == instr) || {}).display_name || instr;
 
     const totalMap = {}, elevMap = {};
@@ -261,6 +281,7 @@ async function loadData() {
     document.getElementById('m-elevated').textContent = Object.values(elevMap).reduce((a,b)=>a+b,0).toLocaleString();
     document.getElementById('m-types').textContent    = tests.length;
     document.getElementById('subtitle').textContent   = 'NBS Analytics — ' + instrLabel + ' — ' + year;
+    document.getElementById('m-instruments').textContent = (rows || []).length > 0 ? [...new Set((rows||[]).map(r=>r.instrument_id))].length : 0;
 
     window._totStats  = totStats;
     window._elevStats = elevStats;
@@ -336,6 +357,23 @@ function showPanel(name, btn) {
   document.getElementById('panel-' + name).classList.add('active');
   if (btn) btn.classList.add('active');
   if (name === 'chart' && window._totStats) buildChart(window._totStats, window._elevStats);
+}
+
+// ── Site dropdown change ──────────────────────────────────────
+function onSiteChange() {
+  const siteId = document.getElementById('site-select').value;
+  const isel = document.getElementById('instrument-select');
+  // Filter instrument dropdown to show only instruments for selected site
+  isel.innerHTML = '<option value="all">All instruments</option>';
+  (window._instruments || []).forEach(instr => {
+    if (siteId === 'all' || instr.site_id == siteId) {
+      const o = document.createElement('option');
+      o.value = instr.id; o.textContent = instr.display_name;
+      o.dataset.siteId = instr.site_id;
+      isel.appendChild(o);
+    }
+  });
+  loadData();
 }
 
 // ── Instrument dropdown change ────────────────────────────────
