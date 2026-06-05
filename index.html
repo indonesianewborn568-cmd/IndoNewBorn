@@ -298,7 +298,9 @@ async function loadData() {
     document.getElementById('m-elevated').textContent = Object.values(elevMap).reduce((a,b)=>a+b,0).toLocaleString();
     document.getElementById('m-types').textContent    = tests.length;
     document.getElementById('subtitle').textContent   = 'NBS Analytics — ' + instrLabel + ' — ' + year;
-    document.getElementById('m-instruments').textContent = (rows || []).length > 0 ? [...new Set((rows||[]).map(r=>r.instrument_id))].length : 0;
+    // Count only active instruments visible in current data
+    const activeInstrIds = new Set((rows || []).map(r => r.instrument_id));
+    document.getElementById('m-instruments').textContent = activeInstrIds.size;
 
     window._totStats  = totStats;
     window._elevStats = elevStats;
