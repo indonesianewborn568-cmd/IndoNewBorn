@@ -452,15 +452,8 @@ async function toggleInstrumentLink() {
   const isActive = instr.active !== false;
   const action = isActive ? 'Delink' : 'Relink';
   const msg = isActive
-    ? 'Delink "' + instr.display_name + '"?
-
-The instrument will be hidden from the dashboard.
-All data is preserved and can be restored by relinking.
-The instrument PC scheduled tasks are NOT affected.'
-    : 'Relink "' + instr.display_name + '"?
-
-The instrument will be visible in the dashboard again.
-All historical data will be restored immediately.';
+    ? 'Delink "' + instr.display_name + '"? The instrument will be hidden from the dashboard. All data is preserved and can be restored by relinking. The PC scheduled tasks are NOT affected.'
+    : 'Relink "' + instr.display_name + '"? The instrument will be visible in the dashboard again. All historical data will be restored immediately.';
 
   if (!confirm(msg)) return;
 
