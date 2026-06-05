@@ -102,6 +102,7 @@
       <option value="all">All instruments</option>
     </select>
     <button class="btn" id="rename-btn" onclick="renameInstrument()" style="display:none" title="Rename selected instrument">&#9998;</button>
+    <button class="btn" id="delink-btn" onclick="toggleInstrumentLink()" style="display:none"></button>
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="push-btn" onclick="triggerPush()">&#8593; Push from instrument</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
@@ -224,17 +225,18 @@ async function init() {
     });
 
     // Load instruments
-    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id', order: 'display_name.asc' });
+    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id,active', order: 'display_name.asc' });
     window._instruments = instrs || [];
     const isel = document.getElementById('instrument-select');
     isel.innerHTML = '<option value="all">All instruments</option>';
     window._instruments.forEach(instr => {
       const o = document.createElement('option');
-      o.value = instr.id; o.textContent = instr.display_name;
+      o.value = instr.id;
+      o.textContent = instr.display_name + (instr.active === false ? ' (delinked)' : '');
       o.dataset.siteId = instr.site_id;
       isel.appendChild(o);
     });
-    document.getElementById('m-instruments').textContent = window._instruments.length;
+    document.getElementById('m-instruments').textContent = window._instruments.filter(i => i.active !== false).length;
 
     await loadData();
   } catch(e) {
@@ -384,8 +386,18 @@ function onSiteChange() {
 // ── Instrument dropdown change ────────────────────────────────
 function onInstrumentChange() {
   const sel = document.getElementById('instrument-select');
-  const btn = document.getElementById('rename-btn');
-  btn.style.display = sel.value !== 'all' ? 'inline-flex' : 'none';
+  const show = sel.value !== 'all';
+  document.getElementById('rename-btn').style.display = show ? 'inline-flex' : 'none';
+  const delinkBtn = document.getElementById('delink-btn');
+  if (show) {
+    const instr = (window._instruments || []).find(i => i.id == sel.value);
+    if (instr) {
+      delinkBtn.textContent = instr.active === false ? 'Relink' : 'Delink';
+      delinkBtn.style.display = 'inline-flex';
+    }
+  } else {
+    delinkBtn.style.display = 'none';
+  }
   loadData();
 }
 
@@ -426,6 +438,41 @@ async function renameSite() {
     await init();
   } catch(e) {
     alert('Rename failed: ' + e.message);
+  }
+}
+
+// ── Delink / Relink instrument ───────────────────────────────
+async function toggleInstrumentLink() {
+  const sel = document.getElementById('instrument-select');
+  const instrId = sel.value;
+  if (instrId === 'all') return;
+  const instr = (window._instruments || []).find(i => i.id == instrId);
+  if (!instr) return;
+
+  const isActive = instr.active !== false;
+  const action = isActive ? 'Delink' : 'Relink';
+  const msg = isActive
+    ? 'Delink "' + instr.display_name + '"?
+
+The instrument will be hidden from the dashboard.
+All data is preserved and can be restored by relinking.
+The instrument PC scheduled tasks are NOT affected.'
+    : 'Relink "' + instr.display_name + '"?
+
+The instrument will be visible in the dashboard again.
+All historical data will be restored immediately.';
+
+  if (!confirm(msg)) return;
+
+  try {
+    const { error } = await _sb.from('instruments')
+      .update({ active: !isActive, updated_at: new Date().toISOString() })
+      .eq('id', instrId);
+    if (error) throw new Error(JSON.stringify(error));
+    alert(action + 'd successfully.');
+    await init();
+  } catch(e) {
+    alert(action + ' failed: ' + e.message);
   }
 }
 
