@@ -717,8 +717,8 @@ function showConfigPanel() {
   list.innerHTML = unassigned.map(c => `
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
       <span style="font-size:13px;min-width:180px;color:var(--muted)">${c.hostname}</span>
-      <input id="dname_${c.id}" type="text" placeholder="Display name (e.g. GSP 1)"
-        value="${c.display_name || c.hostname}"
+      <input id="dname_${c.id}" type="text" placeholder="Instrument name (e.g. GSP 1)"
+        value="${c.display_name !== c.hostname ? c.display_name : ''}"
         style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:160px;">
       <input id="sname_${c.id}" type="text" placeholder="Site name (e.g. KCMH)"
         value="${c.site_name || ''}"
@@ -762,7 +762,7 @@ async function saveInstrumentConfig(configId, hostname) {
       if (instrErr) throw new Error(JSON.stringify(instrErr));
     }
 
-    alert('Saved! ' + hostname + ' is now configured as "' + displayName + '" at site "' + siteName + '".');
+    alert('Saved! ' + hostname + ' is now "' + displayName + '" at site "' + siteName + '".');
     await init();
   } catch(e) {
     alert('Save failed: ' + e.message);
