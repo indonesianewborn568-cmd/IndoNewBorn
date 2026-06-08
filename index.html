@@ -78,6 +78,15 @@
   </div>
 
   <div id="error-banner" class="error-banner"></div>
+  <div id="pending-banner" style="display:none;background:var(--blue-bg);color:var(--blue-text);border:0.5px solid var(--blue);border-radius:var(--radius);padding:12px 16px;font-size:13px;margin-bottom:1rem;">
+    <strong>&#9888; New instrument(s) pending configuration</strong> —
+    <span id="pending-list"></span>
+    <button class="btn" onclick="showConfigPanel()" style="margin-left:10px;font-size:12px;padding:4px 10px;">Configure now</button>
+  </div>
+  <div id="config-panel" style="display:none;background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;">
+    <div style="font-size:14px;font-weight:500;margin-bottom:12px;">Configure new instruments</div>
+    <div id="config-list"></div>
+  </div>
 
   <div class="metrics">
     <div class="metric"><div class="metric-label">Total tests YTD</div><div class="metric-value" id="m-total">&#8212;</div><div class="metric-sub">all result codes</div></div>
@@ -251,6 +260,16 @@ async function init() {
       isel.appendChild(o);
     });
     document.getElementById('m-instruments').textContent = activeInstrs.length;
+
+    // Check for unassigned instruments (in instrument_config but not yet configured)
+    const configs = await sbFrom('instrument_config', { select: 'id,hostname,display_name,site_name', order: 'hostname.asc' });
+    window._instrConfigs = configs || [];
+    const unassigned = configs.filter(c => !c.site_name);
+    if (unassigned.length > 0) {
+      showPendingBanner(unassigned);
+    } else {
+      hidePendingBanner();
+    }
 
     await loadData();
   } catch(e) {
@@ -676,6 +695,77 @@ async function handleFiles(files) {
   if (anySuccess) {
     status.innerHTML += '<div style="margin-top:8px;color:var(--muted)">Refreshing dashboard...</div>';
     await init();
+  }
+}
+
+// ── Pending instrument config banner ─────────────────────────
+function showPendingBanner(unassigned) {
+  const banner = document.getElementById('pending-banner');
+  const list   = document.getElementById('pending-list');
+  list.textContent = unassigned.map(c => c.hostname).join(', ');
+  banner.style.display = 'block';
+}
+function hidePendingBanner() {
+  document.getElementById('pending-banner').style.display = 'none';
+  document.getElementById('config-panel').style.display = 'none';
+}
+function showConfigPanel() {
+  const panel = document.getElementById('config-panel');
+  const list  = document.getElementById('config-list');
+  panel.style.display = 'block';
+  const unassigned = (window._instrConfigs || []).filter(c => !c.site_name);
+  list.innerHTML = unassigned.map(c => `
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+      <span style="font-size:13px;min-width:180px;color:var(--muted)">${c.hostname}</span>
+      <input id="dname_${c.id}" type="text" placeholder="Display name (e.g. GSP 1)"
+        value="${c.display_name || c.hostname}"
+        style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:160px;">
+      <input id="sname_${c.id}" type="text" placeholder="Site name (e.g. KCMH)"
+        value="${c.site_name || ''}"
+        style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:140px;">
+      <button class="btn btn-primary" onclick="saveInstrumentConfig(${c.id},'${c.hostname}')"
+        style="font-size:12px;padding:6px 12px;">Save</button>
+    </div>
+  `).join('');
+}
+
+async function saveInstrumentConfig(configId, hostname) {
+  const displayName = document.getElementById('dname_' + configId).value.trim();
+  const siteName    = document.getElementById('sname_' + configId).value.trim();
+  if (!displayName || !siteName) { alert('Please enter both display name and site name.'); return; }
+
+  try {
+    // Update instrument_config
+    const { error: cfgErr } = await _sb.from('instrument_config')
+      .update({ display_name: displayName, site_name: siteName, updated_at: new Date().toISOString() })
+      .eq('id', configId);
+    if (cfgErr) throw new Error(JSON.stringify(cfgErr));
+
+    // Create site if needed
+    let siteId = null;
+    const { data: existingSite } = await _sb.from('sites').select('id').eq('site_name', siteName).single();
+    if (existingSite) {
+      siteId = existingSite.id;
+    } else {
+      const { data: newSite, error: siteErr } = await _sb.from('sites')
+        .insert({ site_name: siteName }).select('id').single();
+      if (siteErr) throw new Error(JSON.stringify(siteErr));
+      siteId = newSite.id;
+    }
+
+    // Update instrument record if it exists
+    const instr = (window._instruments || []).find(i => i.hostname === hostname);
+    if (instr) {
+      const { error: instrErr } = await _sb.from('instruments')
+        .update({ display_name: displayName, site_id: siteId, updated_at: new Date().toISOString() })
+        .eq('id', instr.id);
+      if (instrErr) throw new Error(JSON.stringify(instrErr));
+    }
+
+    alert('Saved! ' + hostname + ' is now configured as "' + displayName + '" at site "' + siteName + '".');
+    await init();
+  } catch(e) {
+    alert('Save failed: ' + e.message);
   }
 }
 
