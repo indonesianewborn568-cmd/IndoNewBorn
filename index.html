@@ -1260,7 +1260,7 @@ async function addCountry() {
     const tokenDiv = document.getElementById('new-country-token');
     tokenDiv.style.display = 'block';
     const newCountry = window._countries.find(c => c.country_name === name);
-    tokenDiv.innerHTML = 'Country "' + name + '" added!';
+    tokenDiv.innerHTML = 'Country <strong>' + name + '</strong> added!';
     if (newCountry) {
       var btn = document.createElement('button');
       btn.className = 'btn btn-primary';
@@ -1303,9 +1303,22 @@ async function createManagerForCountry(countryId, countryName) {
     const accessUrl = location.origin + location.pathname + '?token=' + token;
     const tokenDiv = document.getElementById('new-country-token');
     tokenDiv.style.display = 'block';
-    tokenDiv.innerHTML = countryName + ' manager URL:<br>' +
-      '<strong style="font-family:monospace;color:var(--blue);font-size:11px">' + accessUrl + '</strong> ' +
-      '<button class="btn" onclick="navigator.clipboard.writeText(this.dataset.url)" data-url="' + accessUrl + '" style="font-size:11px;padding:2px 8px;margin-left:6px">Copy</button>';
+    tokenDiv.textContent = '';
+    var label = document.createElement('span');
+    label.textContent = countryName + ' manager URL: ';
+    var link = document.createElement('strong');
+    link.style.cssText = 'font-family:monospace;color:var(--blue);font-size:11px';
+    link.textContent = accessUrl;
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'btn';
+    copyBtn.style.cssText = 'font-size:11px;padding:2px 8px;margin-left:6px';
+    copyBtn.textContent = 'Copy';
+    copyBtn.dataset.url = accessUrl;
+    copyBtn.addEventListener('click', function() { navigator.clipboard.writeText(this.dataset.url); });
+    tokenDiv.appendChild(label);
+    tokenDiv.appendChild(link);
+    tokenDiv.appendChild(document.createTextNode(' '));
+    tokenDiv.appendChild(copyBtn);
     loadUserList();
   } catch(e) {
     alert('Failed: ' + e.message);
