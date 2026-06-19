@@ -62,10 +62,36 @@
   .upload-zone:hover,.upload-zone.drag{border-color:var(--blue);color:var(--blue);}
   .upload-zone input{display:none;}
   .upload-status{font-size:13px;margin-top:8px;}
+  /* Auth overlay */
+  .auth-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999;}
+  .auth-box{background:var(--surface);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);padding:2.5rem;width:340px;text-align:center;}
+  .auth-box h2{font-size:18px;font-weight:500;margin-bottom:6px;}
+  .auth-box p{font-size:13px;color:var(--muted);margin-bottom:1.5rem;}
+  .auth-input{width:100%;font-size:14px;padding:10px 14px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--bg);color:var(--text);font-family:inherit;margin-bottom:12px;}
+  .auth-error{font-size:12px;color:#c0392b;margin-bottom:10px;display:none;}
+  .role-badge{display:inline-block;font-size:11px;padding:2px 10px;border-radius:20px;font-weight:500;margin-left:8px;}
+  .role-admin{background:#e8f5e9;color:#2e7d32;}
+  .role-country{background:#e3f2fd;color:#1565c0;}
+  .role-site{background:#fff3e0;color:#e65100;}
+  /* User management panel */
+  .user-panel{background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;}
+  .user-row{display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;font-size:13px;}
 </style>
 </head>
 <body>
-<div class="container">
+<!-- Auth overlay -->
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-box">
+    <h2>NBS Analytics</h2>
+    <p>Enter your access token to continue</p>
+    <input class="auth-input" type="password" id="auth-token-input" placeholder="Access token"
+      onkeydown="if(event.key==='Enter') attemptLogin()">
+    <div class="auth-error" id="auth-error">Invalid or inactive token. Please try again.</div>
+    <button class="btn btn-primary" style="width:100%;padding:10px" onclick="attemptLogin()">Sign in</button>
+  </div>
+</div>
+
+<div class="container" id="main-container" style="display:none">
   <div class="header">
     <div>
       <h1>NBS Analytics &#8212; annual test count</h1>
@@ -83,6 +109,33 @@
     <span id="pending-list"></span>
     <button class="btn" onclick="showConfigPanel()" style="margin-left:10px;font-size:12px;padding:4px 10px;">Configure now</button>
   </div>
+  <div id="user-panel" style="display:none" class="user-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="font-size:14px;font-weight:500;">User Access Management</div>
+      <button class="btn" onclick="toggleUserPanel()" style="font-size:12px">Close</button>
+    </div>
+    <div id="user-list"></div>
+    <div style="margin-top:14px;padding-top:14px;border-top:0.5px solid var(--border)">
+      <div style="font-size:13px;font-weight:500;margin-bottom:10px;">Add new user</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="new-user-name" type="text" placeholder="Name" style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:130px;">
+        <select id="new-user-role" onchange="updateNewUserScope()" style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);">
+          <option value="admin">Admin</option>
+          <option value="country_manager">Country Manager</option>
+          <option value="site_manager">Site Manager</option>
+        </select>
+        <select id="new-user-country" style="display:none;font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);">
+          <option value="">Select country</option>
+        </select>
+        <select id="new-user-site" style="display:none;font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);">
+          <option value="">Select site</option>
+        </select>
+        <button class="btn btn-primary" onclick="addUser()" style="font-size:12px;padding:6px 14px;">Add user</button>
+      </div>
+      <div id="new-user-token" style="margin-top:10px;font-size:12px;color:var(--muted);display:none;"></div>
+    </div>
+  </div>
+
   <div id="config-panel" style="display:none;background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;">
     <div style="font-size:14px;font-weight:500;margin-bottom:12px;">Configure new instruments</div>
     <div id="config-list"></div>
@@ -119,6 +172,7 @@
     <button class="btn" id="delink-btn" onclick="toggleInstrumentLink()" style="display:none"></button>
     <button class="btn" id="show-delinked-btn" onclick="toggleShowDelinked()" style="font-size:11px;color:var(--muted)" title="Show delinked instruments for management">&#128274; Delinked</button>
     <button class="btn" onclick="init()">&#8635; Refresh</button>
+    <button class="btn" id="manage-users-btn" onclick="toggleUserPanel()" style="display:none" title="Manage user access">&#128100; Users</button>
     <button class="btn" id="push-btn" onclick="triggerPush()">&#8593; Push from instrument</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
@@ -253,7 +307,15 @@ async function init() {
       csel.appendChild(o);
       if (c.country_name === 'Indonesia') defaultCountryId = c.id;
     });
-    csel.value = defaultCountryId;
+    // Apply user restriction -- lock country/site dropdowns for non-admin
+    const userOverrides = getUserFilterOverrides();
+    if (userOverrides.country_id) {
+      defaultCountryId = userOverrides.country_id;
+      csel.value = defaultCountryId;
+      csel.disabled = true;
+    } else {
+      csel.value = defaultCountryId;
+    }
 
     // Load sites -- filtered by default country
     const sitesData = await sbFrom('sites', { select: 'id,site_name,country_id', order: 'site_name.asc' });
@@ -287,6 +349,13 @@ async function init() {
       isel.appendChild(o);
     });
     document.getElementById('m-instruments').textContent = activeInstrs.length;
+    // Lock site dropdown for site_manager
+    if (userOverrides && userOverrides.site_id) {
+      const ssel2 = document.getElementById('site-select');
+      ssel2.value = userOverrides.site_id;
+      ssel2.disabled = true;
+      document.getElementById('country-select').disabled = true;
+    }
 
     // Check for unassigned instruments (in instrument_config but not yet configured)
     const configs = await sbFrom('instrument_config', { select: 'id,hostname,display_name,site_name', order: 'hostname.asc' });
@@ -321,6 +390,10 @@ async function loadData() {
     if (instr !== 'all') fnParams.p_instrument_id = parseInt(instr);
     else if (site !== 'all') fnParams.p_site_id = parseInt(site);
     else if (country !== 'all') fnParams.p_country_id = parseInt(country);
+    // Apply user access restrictions
+    const overrides = getUserFilterOverrides();
+    if (overrides.country_id && !fnParams.p_instrument_id && !fnParams.p_site_id) fnParams.p_country_id = overrides.country_id;
+    if (overrides.site_id && !fnParams.p_instrument_id) fnParams.p_site_id = overrides.site_id;
     const rows = await sbRpc('get_monthly_report', fnParams);
 
     const countryLabel = country === 'all' ? 'All countries'
@@ -1008,8 +1081,190 @@ async function saveInstrumentConfig(configId, hostname) {
   }
 }
 
+// ── Auth ──────────────────────────────────────────────────────
+window._currentUser = null;
+
+async function attemptLogin() {
+  const token = document.getElementById('auth-token-input').value.trim();
+  if (!token) return;
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?token=eq.' + encodeURIComponent(token) + '&active=eq.true&select=id,name,role,country_id,site_id', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    const users = await resp.json();
+    if (!users || users.length === 0) {
+      document.getElementById('auth-error').style.display = 'block';
+      return;
+    }
+    window._currentUser = users[0];
+    localStorage.setItem('nbs_token', token);
+    document.getElementById('auth-overlay').style.display = 'none';
+    document.getElementById('main-container').style.display = 'block';
+    applyUserRestrictions();
+    await init();
+  } catch(e) {
+    document.getElementById('auth-error').style.display = 'block';
+    document.getElementById('auth-error').textContent = 'Connection error: ' + e.message;
+  }
+}
+
+function applyUserRestrictions() {
+  const user = window._currentUser;
+  if (!user) return;
+  const isAdmin = user.role === 'admin';
+
+  // Show role badge in header
+  const roleLabels = { admin: 'Admin', country_manager: 'Country Manager', site_manager: 'Site Manager' };
+  const roleClasses = { admin: 'role-admin', country_manager: 'role-country', site_manager: 'role-site' };
+  const badge = '<span class="role-badge ' + roleClasses[user.role] + '">' + roleLabels[user.role] + '</span>';
+  document.getElementById('subtitle').insertAdjacentHTML('afterend', '<div style="font-size:12px;margin-top:4px">' + (user.name || '') + badge + ' <a href="#" onclick="logout()" style="font-size:11px;color:var(--muted);margin-left:8px;">Sign out</a></div>');
+
+  // Hide edit controls for non-admins
+  if (!isAdmin) {
+    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','push-btn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+
+  // Show user management for admins only
+  if (isAdmin) {
+    document.getElementById('manage-users-btn').style.display = 'inline-flex';
+  }
+}
+
+function logout() {
+  localStorage.removeItem('nbs_token');
+  window._currentUser = null;
+  location.reload();
+}
+
+// ── User management ───────────────────────────────────────────
+function toggleUserPanel() {
+  const panel = document.getElementById('user-panel');
+  const isVisible = panel.style.display !== 'none';
+  panel.style.display = isVisible ? 'none' : 'block';
+  if (!isVisible) loadUserList();
+}
+
+async function loadUserList() {
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?select=id,name,role,token,country_id,site_id,active&order=id.asc', {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+  });
+  const users = await resp.json();
+  const list = document.getElementById('user-list');
+  const roleLabels = { admin: 'Admin', country_manager: 'Country Manager', site_manager: 'Site Manager' };
+  const roleClasses = { admin: 'role-admin', country_manager: 'role-country', site_manager: 'role-site' };
+
+  list.innerHTML = users.map(u => {
+    const country = u.country_id ? (window._countries || []).find(c => c.id == u.country_id) : null;
+    const site    = u.site_id    ? (window._sites    || []).find(s => s.id == u.site_id)    : null;
+    const scope   = country ? country.country_name : (site ? site.site_name : 'All countries');
+    return '<div class="user-row" style="' + (u.active ? '' : 'opacity:0.5') + '">' +
+      '<span style="min-width:120px;font-weight:500">' + u.name + '</span>' +
+      '<span class="role-badge ' + roleClasses[u.role] + '">' + roleLabels[u.role] + '</span>' +
+      '<span style="color:var(--muted);font-size:12px">' + scope + '</span>' +
+      '<span style="font-size:11px;font-family:monospace;background:var(--metric);padding:2px 8px;border-radius:4px;color:var(--muted)">' + u.token + '</span>' +
+      '<button class="btn" onclick="toggleUserActive(' + u.id + ',' + u.active + ')" style="font-size:11px;padding:3px 8px">' + (u.active ? 'Disable' : 'Enable') + '</button>' +
+      (u.role !== 'admin' || users.filter(x=>x.role==='admin'&&x.active).length > 1 ? '<button class="btn" onclick="deleteUser(' + u.id + ')" style="font-size:11px;padding:3px 8px;color:#c0392b">Delete</button>' : '') +
+      '</div>';
+  }).join('');
+}
+
+async function toggleUserActive(userId, currentActive) {
+  await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?id=eq.' + userId, {
+    method: 'PATCH',
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: !currentActive })
+  });
+  loadUserList();
+}
+
+async function deleteUser(userId) {
+  if (!confirm('Delete this user? They will lose access immediately.')) return;
+  await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?id=eq.' + userId, {
+    method: 'DELETE',
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+  });
+  loadUserList();
+}
+
+function updateNewUserScope() {
+  const role = document.getElementById('new-user-role').value;
+  const csel = document.getElementById('new-user-country');
+  const ssel = document.getElementById('new-user-site');
+  csel.style.display = 'none';
+  ssel.style.display = 'none';
+  if (role === 'country_manager') {
+    csel.innerHTML = '<option value="">Select country</option>' +
+      (window._countries || []).map(c => '<option value="' + c.id + '">' + c.country_name + '</option>').join('');
+    csel.style.display = 'inline-block';
+  } else if (role === 'site_manager') {
+    ssel.innerHTML = '<option value="">Select site</option>' +
+      (window._sites || []).map(s => '<option value="' + s.id + '">' + s.site_name + '</option>').join('');
+    ssel.style.display = 'inline-block';
+  }
+}
+
+async function addUser() {
+  const name    = document.getElementById('new-user-name').value.trim();
+  const role    = document.getElementById('new-user-role').value;
+  const countryId = document.getElementById('new-user-country').value || null;
+  const siteId    = document.getElementById('new-user-site').value || null;
+  if (!name) { alert('Please enter a name.'); return; }
+  if (role === 'country_manager' && !countryId) { alert('Please select a country.'); return; }
+  if (role === 'site_manager' && !siteId) { alert('Please select a site.'); return; }
+
+  // Generate a random token
+  const token = role.toUpperCase().slice(0,3) + '-' + Math.random().toString(36).slice(2,8).toUpperCase() + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
+
+  const payload = { name, token, role };
+  if (countryId) payload.country_id = parseInt(countryId);
+  if (siteId)    payload.site_id    = parseInt(siteId);
+
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+
+    const tokenDiv = document.getElementById('new-user-token');
+    tokenDiv.style.display = 'block';
+    tokenDiv.innerHTML = 'User created! Share this access URL with ' + name + ':<br>' +
+      '<strong style="font-family:monospace;color:var(--blue)">' + location.origin + location.pathname + '?token=' + token + '</strong>' +
+      ' <button class="btn" onclick="navigator.clipboard.writeText('' + location.origin + location.pathname + '?token=' + token + '')" style="font-size:11px;padding:2px 8px;margin-left:6px">Copy</button>';
+
+    document.getElementById('new-user-name').value = '';
+    loadUserList();
+  } catch(e) {
+    alert('Failed to add user: ' + e.message);
+  }
+}
+
+// ── Restrict country/site filters for non-admin users ─────────
+function getUserFilterOverrides() {
+  const user = window._currentUser;
+  if (!user || user.role === 'admin') return {};
+  if (user.role === 'country_manager') return { country_id: user.country_id };
+  if (user.role === 'site_manager')    return { site_id: user.site_id };
+  return {};
+}
+
 // ── Start ─────────────────────────────────────────────────────
-init();
+// Check for saved token in URL or localStorage
+(async function() {
+  const params = new URLSearchParams(location.search);
+  const urlToken = params.get('token');
+  const savedToken = urlToken || localStorage.getItem('nbs_token');
+  if (savedToken) {
+    document.getElementById('auth-token-input').value = savedToken;
+    if (urlToken) localStorage.setItem('nbs_token', urlToken);
+    await attemptLogin();
+  }
+})();
 </script>
+</div>
 </body>
 </html>
