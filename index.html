@@ -801,7 +801,7 @@ function toggleShowDelinked() {
 }
 
 // ── Change a site's country ──────────────────────────────────
-async function moveSiteCountry() {
+function moveSiteCountry() {
   const sel = document.getElementById('site-select');
   const siteId = sel.value;
   if (siteId === 'all') return;
@@ -809,36 +809,81 @@ async function moveSiteCountry() {
   if (!site) return;
   const currentCountry = (window._countries || []).find(c => c.id == site.country_id);
 
-  const newCountryName = prompt(
-    'Change country for site "' + site.site_name + '". Current country: ' + (currentCountry ? currentCountry.country_name : 'none') + '. Enter new country name (existing or new):',
-    currentCountry ? currentCountry.country_name : ''
-  );
-  if (newCountryName === null) return;
-  const countryNameTrimmed = newCountryName.trim();
-  if (!countryNameTrimmed) { alert('Country name cannot be empty.'); return; }
+  // Build dropdown modal
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
 
-  try {
-    let countryId;
-    const { data: existingCountry } = await _sb.from('countries').select('id').eq('country_name', countryNameTrimmed).single();
-    if (existingCountry) {
-      countryId = existingCountry.id;
-    } else {
-      const { data: newCountry, error: cErr } = await _sb.from('countries')
-        .insert({ country_name: countryNameTrimmed }).select('id').single();
-      if (cErr) throw new Error(JSON.stringify(cErr));
-      countryId = newCountry.id;
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--surface);border-radius:var(--radius-lg);padding:1.5rem;width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+
+  var title = document.createElement('div');
+  title.style.cssText = 'font-size:14px;font-weight:500;margin-bottom:4px;';
+  title.textContent = 'Change country for "' + site.site_name + '"';
+
+  var subtitle = document.createElement('div');
+  subtitle.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:14px;';
+  subtitle.textContent = 'Current: ' + (currentCountry ? currentCountry.country_name : 'none');
+
+  var countrySelect = document.createElement('select');
+  countrySelect.style.cssText = 'width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);margin-bottom:10px;';
+  countrySelect.innerHTML = '<option value="">Select country</option>' +
+    (window._countries || []).map(c => '<option value="' + c.id + '"' + (currentCountry && currentCountry.id == c.id ? ' selected' : '') + '>' + c.country_name + '</option>').join('') +
+    '<option value="__new__">+ Add new country...</option>';
+
+  var newCountryInput = document.createElement('input');
+  newCountryInput.type = 'text';
+  newCountryInput.placeholder = 'New country name';
+  newCountryInput.style.cssText = 'width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);margin-bottom:10px;display:none;';
+
+  countrySelect.addEventListener('change', function() {
+    newCountryInput.style.display = this.value === '__new__' ? 'block' : 'none';
+  });
+
+  var btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:4px;';
+
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', function() { document.body.removeChild(overlay); });
+
+  var saveBtn = document.createElement('button');
+  saveBtn.className = 'btn btn-primary';
+  saveBtn.textContent = 'Save';
+  saveBtn.addEventListener('click', async function() {
+    const selectedVal = countrySelect.value;
+    if (!selectedVal) { alert('Please select a country.'); return; }
+    try {
+      let countryId;
+      if (selectedVal === '__new__') {
+        const newName = newCountryInput.value.trim();
+        if (!newName) { alert('Please enter a country name.'); return; }
+        const { data: nc, error: cErr } = await _sb.from('countries').insert({ country_name: newName }).select('id').single();
+        if (cErr) throw new Error(JSON.stringify(cErr));
+        countryId = nc.id;
+      } else {
+        countryId = parseInt(selectedVal);
+      }
+      const { error: siteErr } = await _sb.from('sites')
+        .update({ country_id: countryId, updated_at: new Date().toISOString() })
+        .eq('id', siteId);
+      if (siteErr) throw new Error(JSON.stringify(siteErr));
+      document.body.removeChild(overlay);
+      await init();
+    } catch(e) {
+      alert('Failed: ' + e.message);
     }
+  });
 
-    const { error: siteErr } = await _sb.from('sites')
-      .update({ country_id: countryId, updated_at: new Date().toISOString() })
-      .eq('id', siteId);
-    if (siteErr) throw new Error(JSON.stringify(siteErr));
-
-    alert('Site "' + site.site_name + '" moved to country "' + countryNameTrimmed + '".');
-    await init();
-  } catch(e) {
-    alert('Failed: ' + e.message);
-  }
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(saveBtn);
+  box.appendChild(title);
+  box.appendChild(subtitle);
+  box.appendChild(countrySelect);
+  box.appendChild(newCountryInput);
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 // ── Delink / Relink instrument ───────────────────────────────
@@ -1057,29 +1102,81 @@ function showConfigPanel() {
   const list  = document.getElementById('config-list');
   panel.style.display = 'block';
   const unassigned = (window._instrConfigs || []).filter(c => !c.site_name);
-  list.innerHTML = unassigned.map(c => `
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-      <span style="font-size:13px;min-width:160px;color:var(--muted)">${c.hostname}</span>
-      <input id="dname_${c.id}" type="text" placeholder="Instrument name (e.g. GSP 1)"
-        value="${c.display_name !== c.hostname ? c.display_name : ''}"
-        style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:150px;">
-      <input id="sname_${c.id}" type="text" placeholder="Site name (e.g. KCMH)"
-        value="${c.site_name || ''}"
-        style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:130px;">
-      <input id="cname_${c.id}" type="text" placeholder="Country (e.g. Thailand)"
-        value=""
-        style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:140px;">
-      <button class="btn btn-primary" onclick="saveInstrumentConfig(${c.id},'${c.hostname}')"
-        style="font-size:12px;padding:6px 12px;">Save</button>
-    </div>
-  `).join('');
+  // Build country options for dropdown
+  const countryOptions = (window._countries || []).map(c =>
+    '<option value="' + c.country_name + '">' + c.country_name + '</option>'
+  ).join('');
+
+  list.innerHTML = '';
+  unassigned.forEach(c => {
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;';
+
+    var hostnameSpan = document.createElement('span');
+    hostnameSpan.style.cssText = 'font-size:13px;min-width:160px;color:var(--muted)';
+    hostnameSpan.textContent = c.hostname;
+
+    var dnameInput = document.createElement('input');
+    dnameInput.id = 'dname_' + c.id;
+    dnameInput.type = 'text';
+    dnameInput.placeholder = 'Instrument name (e.g. GSP 1)';
+    dnameInput.value = c.display_name !== c.hostname ? c.display_name : '';
+    dnameInput.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:150px;';
+
+    var snameInput = document.createElement('input');
+    snameInput.id = 'sname_' + c.id;
+    snameInput.type = 'text';
+    snameInput.placeholder = 'Site name (e.g. KCMH)';
+    snameInput.value = c.site_name || '';
+    snameInput.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:130px;';
+
+    // Country dropdown
+    var cnameSelect = document.createElement('select');
+    cnameSelect.id = 'cname_' + c.id;
+    cnameSelect.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:140px;';
+    cnameSelect.innerHTML = '<option value="">Select country</option>' + countryOptions + '<option value="__new__">+ Add new country...</option>';
+
+    // New country input (hidden by default)
+    var cnameNew = document.createElement('input');
+    cnameNew.id = 'cname_new_' + c.id;
+    cnameNew.type = 'text';
+    cnameNew.placeholder = 'New country name';
+    cnameNew.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:140px;display:none;';
+
+    cnameSelect.addEventListener('change', function() {
+      cnameNew.style.display = this.value === '__new__' ? 'inline-block' : 'none';
+    });
+
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-primary';
+    saveBtn.style.cssText = 'font-size:12px;padding:6px 12px;';
+    saveBtn.textContent = 'Save';
+    saveBtn.dataset.configId = c.id;
+    saveBtn.dataset.hostname = c.hostname;
+    saveBtn.addEventListener('click', function() {
+      saveInstrumentConfig(parseInt(this.dataset.configId), this.dataset.hostname);
+    });
+
+    row.appendChild(hostnameSpan);
+    row.appendChild(dnameInput);
+    row.appendChild(snameInput);
+    row.appendChild(cnameSelect);
+    row.appendChild(cnameNew);
+    row.appendChild(saveBtn);
+    list.appendChild(row);
+  });
 }
 
 async function saveInstrumentConfig(configId, hostname) {
   const displayName  = document.getElementById('dname_' + configId).value.trim();
   const siteName     = document.getElementById('sname_' + configId).value.trim();
-  const countryName  = document.getElementById('cname_' + configId).value.trim();
+  const countrySelect = document.getElementById('cname_' + configId);
+  const countryNewInput = document.getElementById('cname_new_' + configId);
+  const countryName = countrySelect.value === '__new__'
+    ? (countryNewInput ? countryNewInput.value.trim() : '')
+    : countrySelect.value;
   if (!displayName || !siteName) { alert('Please enter both instrument name and site name.'); return; }
+  if (countrySelect.value === '__new__' && !countryName) { alert('Please enter a new country name.'); return; }
 
   try {
     // Update instrument_config
