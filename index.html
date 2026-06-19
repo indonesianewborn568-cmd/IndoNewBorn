@@ -272,8 +272,12 @@ async function init() {
   setStatus('loading', 'Connecting...');
   clearError();
   try {
-    // Load years via RPC function
-    const yearsData = await sbRpc('get_available_years', {});
+    // Load years via RPC function -- filtered by user's country/site restriction
+    const userOverridesForYears = getUserFilterOverrides();
+    const yearsParams = {};
+    if (userOverridesForYears.country_id) yearsParams.p_country_id = userOverridesForYears.country_id;
+    if (userOverridesForYears.site_id)    yearsParams.p_site_id    = userOverridesForYears.site_id;
+    const yearsData = await sbRpc('get_available_years', yearsParams);
     const uniqueYears = (yearsData || []).map(r => r.year);
 
     const sel = document.getElementById('year-select');
