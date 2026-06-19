@@ -1232,9 +1232,10 @@ async function addUser() {
 
     const tokenDiv = document.getElementById('new-user-token');
     tokenDiv.style.display = 'block';
+    var accessUrl = location.origin + location.pathname + '?token=' + token;
     tokenDiv.innerHTML = 'User created! Share this access URL with ' + name + ':<br>' +
-      '<strong style="font-family:monospace;color:var(--blue)">' + location.origin + location.pathname + '?token=' + token + '</strong>' +
-      ' <button class="btn" onclick="navigator.clipboard.writeText('' + location.origin + location.pathname + '?token=' + token + '')" style="font-size:11px;padding:2px 8px;margin-left:6px">Copy</button>';
+      '<strong style="font-family:monospace;color:var(--blue)">' + accessUrl + '</strong> ' +
+      '<button class="btn" onclick="navigator.clipboard.writeText(this.dataset.url)" data-url="' + accessUrl + '" style="font-size:11px;padding:2px 8px;margin-left:6px">Copy</button>';
 
     document.getElementById('new-user-name').value = '';
     loadUserList();
