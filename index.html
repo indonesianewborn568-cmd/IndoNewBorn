@@ -584,8 +584,8 @@ function onCountryChange() {
 function onSiteChange() {
   const siteId = document.getElementById('site-select').value;
   // Show/hide site rename button
-  document.getElementById('rename-site-btn').style.display = siteId !== 'all' ? 'inline-flex' : 'none';
-  document.getElementById('move-site-btn').style.display = siteId !== 'all' ? 'inline-flex' : 'none';
+  document.getElementById('rename-site-btn').style.display = siteId !== 'all' && !window._nonAdminMode ? 'inline-flex' : 'none';
+  document.getElementById('move-site-btn').style.display = siteId !== 'all' && !window._nonAdminMode ? 'inline-flex' : 'none';
   // Reset instrument rename button
   document.getElementById('rename-btn').style.display = 'none';
   // Filter instrument dropdown to show only instruments for selected site
@@ -605,7 +605,7 @@ function onSiteChange() {
 // ── Instrument dropdown change ────────────────────────────────
 function onInstrumentChange() {
   const sel = document.getElementById('instrument-select');
-  const show = sel.value !== 'all';
+  const show = sel.value !== 'all' && !window._nonAdminMode;
   document.getElementById('rename-btn').style.display = show ? 'inline-flex' : 'none';
   document.getElementById('move-btn').style.display = show ? 'inline-flex' : 'none';
   const delinkBtn = document.getElementById('delink-btn');
@@ -614,7 +614,7 @@ function onInstrumentChange() {
     const instr = (window._instruments || []).find(i => i.id == sel.value);
     if (instr) {
       delinkBtn.textContent = instr.active === false ? 'Relink' : 'Delink';
-      delinkBtn.style.display = 'inline-flex';
+      delinkBtn.style.display = window._nonAdminMode ? 'none' : 'inline-flex';
     }
   } else {
     delinkBtn.style.display = 'none';
@@ -1123,12 +1123,14 @@ function applyUserRestrictions() {
   const badge = '<span class="role-badge ' + roleClasses[user.role] + '">' + roleLabels[user.role] + '</span>';
   document.getElementById('subtitle').insertAdjacentHTML('afterend', '<div style="font-size:12px;margin-top:4px">' + (user.name || '') + badge + ' <a href="#" onclick="logout()" style="font-size:11px;color:var(--muted);margin-left:8px;">Sign out</a></div>');
 
-  // Hide edit controls for non-admins
+  // Hide ALL edit controls for non-admins
   if (!isAdmin) {
-    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','push-btn'].forEach(id => {
+    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','push-btn','manage-users-btn'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
+    // Also permanently override onInstrumentChange and onSiteChange to never show edit buttons
+    window._nonAdminMode = true;
   }
 
   // Show user management for admins only
