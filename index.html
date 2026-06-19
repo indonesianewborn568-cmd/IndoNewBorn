@@ -487,11 +487,12 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
 
   let rows = '';
   regularTests.forEach(name => {
-    // Only treat Asa-Total as Neobase 2 panel representative if it is
-    // the only analyte (MSMS instrument). If other tests exist alongside
-    // Asa-Total (GSP instrument), treat it as a normal row.
+    // Only treat Asa-Total as Neobase 2 panel representative when MSMS data
+    // is present (msmsTests.length > 0 means MSMS analytes exist in this view).
+    // If Asa-Total appears without any MSMS analytes (e.g. pure GSP view),
+    // treat it as a normal GSP row.
     const isNeobase2Representative = isTotalsTab &&
-      (name === 'C0' || (name === 'Asa-Total' && tests.length === 1));
+      (name === 'C0' || (name === 'Asa-Total' && msmsTests.length > 0));
     if (isNeobase2Representative) {
       rows += renderC0SummaryRow(name);
     } else {
@@ -503,7 +504,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
     if (name !== 'C0') rows += renderRow(name, true);
   });
 
-  rows += '<tr class="total-row"><td>Total' + (isTotalsTab ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS counted via C0)</span>' : '') + '</td>';
+  rows += '<tr class="total-row"><td>Total' + (isTotalsTab ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS panel counted via Neobase 2)</span>' : '') + '</td>';
   colTotals.forEach((v,i) => rows += '<td' + (i===curMonth?' style="color:var(--blue)"':'') + '>' + v.toLocaleString() + '</td>');
   rows += '<td>' + grandTotal.toLocaleString() + '</td></tr>';
   tbody.innerHTML = rows;
