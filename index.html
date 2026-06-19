@@ -1259,8 +1259,20 @@ async function addCountry() {
     // Show success and offer to create manager URL
     const tokenDiv = document.getElementById('new-country-token');
     tokenDiv.style.display = 'block';
-    tokenDiv.innerHTML = 'Country "' + name + '" added! <button class="btn btn-primary" onclick="createManagerForCountry(' +
-      window._countries.find(c=>c.country_name===name)?.id + ','' + name + '')" style="font-size:11px;padding:3px 10px;margin-left:6px">Create manager URL</button>';
+    const newCountry = window._countries.find(c => c.country_name === name);
+    tokenDiv.innerHTML = 'Country "' + name + '" added!';
+    if (newCountry) {
+      var btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.style.cssText = 'font-size:11px;padding:3px 10px;margin-left:6px';
+      btn.textContent = 'Create manager URL';
+      btn.dataset.countryId = newCountry.id;
+      btn.dataset.countryName = newCountry.country_name;
+      btn.addEventListener('click', function() {
+        createManagerForCountry(parseInt(this.dataset.countryId), this.dataset.countryName);
+      });
+      tokenDiv.appendChild(btn);
+    }
   } catch(e) {
     alert('Failed: ' + e.message);
   }
