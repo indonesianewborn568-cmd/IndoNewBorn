@@ -1207,14 +1207,30 @@ function toggleUserPanel() {
 async function loadCountryMgmt() {
   const list = document.getElementById('country-mgmt-list');
   const countries = window._countries || [];
-  if (countries.length === 0) { list.innerHTML = '<span style="color:var(--muted)">No countries yet.</span>'; return; }
+  if (countries.length === 0) {
+    list.innerHTML = '<span style="color:var(--muted)">No countries yet.</span>';
+    return;
+  }
   list.innerHTML = countries.map(c =>
-    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;" data-country-id="' + c.id + '" data-country-name="' + c.country_name.replace(/"/g, "&quot;") + '">' +
     '<span style="min-width:140px">' + c.country_name + '</span>' +
-    '<button class="btn" onclick="renameCountry(' + c.id + ','' + c.country_name + '')" style="font-size:11px;padding:3px 8px;">&#9998; Rename</button>' +
-    '<button class="btn" onclick="createManagerForCountry(' + c.id + ','' + c.country_name + '')" style="font-size:11px;padding:3px 8px;">&#128279; Get URL</button>' +
+    '<button class="btn country-rename-btn" style="font-size:11px;padding:3px 8px;">&#9998; Rename</button>' +
+    '<button class="btn country-url-btn" style="font-size:11px;padding:3px 8px;">&#128279; Get URL</button>' +
     '</div>'
   ).join('');
+  // Attach events using data attributes -- avoids inline quote issues
+  list.querySelectorAll('.country-rename-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const row = this.closest('[data-country-id]');
+      renameCountry(parseInt(row.dataset.countryId), row.dataset.countryName);
+    });
+  });
+  list.querySelectorAll('.country-url-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const row = this.closest('[data-country-id]');
+      createManagerForCountry(parseInt(row.dataset.countryId), row.dataset.countryName);
+    });
+  });
 }
 
 async function addCountry() {
@@ -1266,7 +1282,7 @@ async function renameCountry(countryId, currentName) {
 }
 
 async function createManagerForCountry(countryId, countryName) {
-  const token = countryName.replace(/\s+/g,'') + 'NBS' + Math.floor(Math.random()*9000+1000);
+  const token = countryName.split(' ').join('') + 'NBS' + Math.floor(Math.random()*9000+1000);
   try {
     const { error } = await _sb.from('dashboard_users').insert({
       name: countryName, token, role: 'country_manager', country_id: countryId
