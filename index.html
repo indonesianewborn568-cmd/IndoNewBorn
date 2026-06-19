@@ -550,6 +550,44 @@ function showPanel(name, btn) {
   if (name === 'chart' && window._totStats) buildChart(window._totStats, window._elevStats);
 }
 
+// ── Refresh year dropdown based on current filters ───────────
+async function refreshYears() {
+  const country = document.getElementById('country-select').value;
+  const site    = document.getElementById('site-select').value;
+  const instr   = document.getElementById('instrument-select').value;
+  const userOverrides = getUserFilterOverrides();
+  const params = {};
+  if (instr !== 'all') params.p_instrument_id = parseInt(instr);
+  else if (site !== 'all') params.p_site_id = parseInt(site);
+  else if (country !== 'all') params.p_country_id = parseInt(country);
+  else if (userOverrides.country_id) params.p_country_id = userOverrides.country_id;
+  else if (userOverrides.site_id)    params.p_site_id    = userOverrides.site_id;
+
+  try {
+    const yearsData = await sbRpc('get_available_years', params);
+    const uniqueYears = (yearsData || []).map(r => r.year);
+    const sel = document.getElementById('year-select');
+    const currentYear = sel.value;
+    sel.innerHTML = '';
+    if (uniqueYears.length === 0) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = 'No data';
+      sel.appendChild(o);
+      return;
+    }
+    uniqueYears.forEach(y => {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      if (y == currentYear) o.selected = true;
+      sel.appendChild(o);
+    });
+    // If previous year no longer valid, default to first available
+    if (!uniqueYears.includes(parseInt(currentYear))) sel.value = uniqueYears[0];
+  } catch(e) {
+    console.error('refreshYears error:', e);
+  }
+}
+
 // ── Country dropdown change ───────────────────────────────────
 function onCountryChange() {
   const countryId = document.getElementById('country-select').value;
@@ -577,7 +615,7 @@ function onCountryChange() {
       isel.appendChild(o);
     }
   });
-  loadData();
+  refreshYears().then(() => loadData());
 }
 
 // ── Site dropdown change ──────────────────────────────────────
@@ -599,7 +637,7 @@ function onSiteChange() {
       isel.appendChild(o);
     }
   });
-  loadData();
+  refreshYears().then(() => loadData());
 }
 
 // ── Instrument dropdown change ────────────────────────────────
@@ -619,7 +657,7 @@ function onInstrumentChange() {
   } else {
     delinkBtn.style.display = 'none';
   }
-  loadData();
+  refreshYears().then(() => loadData());
 }
 
 // ── Rename instrument ─────────────────────────────────────────
