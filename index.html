@@ -1294,12 +1294,22 @@ async function renameCountry(countryId, currentName) {
 }
 
 async function createManagerForCountry(countryId, countryName) {
-  const token = countryName.split(' ').join('') + 'NBS' + Math.floor(Math.random()*9000+1000);
   try {
-    const { error } = await _sb.from('dashboard_users').insert({
-      name: countryName, token, role: 'country_manager', country_id: countryId
+    // Check if manager already exists for this country
+    const existingResp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?country_id=eq.' + countryId + '&role=eq.country_manager&active=eq.true&select=token', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
     });
-    if (error) throw new Error(JSON.stringify(error));
+    const existing = await existingResp.json();
+    var token;
+    if (existing && existing.length > 0) {
+      token = existing[0].token;
+    } else {
+      token = countryName.split(' ').join('') + 'NBS' + Math.floor(Math.random()*9000+1000);
+      const { error } = await _sb.from('dashboard_users').insert({
+        name: countryName, token, role: 'country_manager', country_id: countryId
+      });
+      if (error) throw new Error(JSON.stringify(error));
+    }
     const accessUrl = location.origin + location.pathname + '?token=' + token;
     const tokenDiv = document.getElementById('new-country-token');
     tokenDiv.style.display = 'block';
@@ -1333,20 +1343,77 @@ async function loadUserList() {
   const list = document.getElementById('user-list');
   const roleLabels = { admin: 'Admin', country_manager: 'Country Manager', site_manager: 'Site Manager' };
   const roleClasses = { admin: 'role-admin', country_manager: 'role-country', site_manager: 'role-site' };
+  const adminCount = users.filter(x => x.role === 'admin' && x.active).length;
 
-  list.innerHTML = users.map(u => {
+  list.innerHTML = '';
+  users.forEach(u => {
     const country = u.country_id ? (window._countries || []).find(c => c.id == u.country_id) : null;
     const site    = u.site_id    ? (window._sites    || []).find(s => s.id == u.site_id)    : null;
     const scope   = country ? country.country_name : (site ? site.site_name : 'All countries');
-    return '<div class="user-row" style="' + (u.active ? '' : 'opacity:0.5') + '">' +
-      '<span style="min-width:120px;font-weight:500">' + u.name + '</span>' +
-      '<span class="role-badge ' + roleClasses[u.role] + '">' + roleLabels[u.role] + '</span>' +
-      '<span style="color:var(--muted);font-size:12px">' + scope + '</span>' +
-      '<span style="font-size:11px;font-family:monospace;background:var(--metric);padding:2px 8px;border-radius:4px;color:var(--muted)">' + u.token + '</span>' +
-      '<button class="btn" onclick="toggleUserActive(' + u.id + ',' + u.active + ')" style="font-size:11px;padding:3px 8px">' + (u.active ? 'Disable' : 'Enable') + '</button>' +
-      (u.role !== 'admin' || users.filter(x=>x.role==='admin'&&x.active).length > 1 ? '<button class="btn" onclick="deleteUser(' + u.id + ')" style="font-size:11px;padding:3px 8px;color:#c0392b">Delete</button>' : '') +
-      '</div>';
-  }).join('');
+
+    var row = document.createElement('div');
+    row.className = 'user-row';
+    row.style.opacity = u.active ? '1' : '0.5';
+
+    var nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'min-width:120px;font-weight:500';
+    nameSpan.textContent = u.name;
+
+    var roleBadge = document.createElement('span');
+    roleBadge.className = 'role-badge ' + roleClasses[u.role];
+    roleBadge.textContent = roleLabels[u.role];
+
+    var scopeSpan = document.createElement('span');
+    scopeSpan.style.cssText = 'color:var(--muted);font-size:12px';
+    scopeSpan.textContent = scope;
+
+    var tokenSpan = document.createElement('span');
+    tokenSpan.style.cssText = 'font-size:11px;font-family:monospace;background:var(--metric);padding:2px 8px;border-radius:4px;color:var(--muted)';
+    tokenSpan.textContent = u.token;
+
+    var toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn';
+    toggleBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+    toggleBtn.textContent = u.active ? 'Disable' : 'Enable';
+    toggleBtn.dataset.userId = u.id;
+    toggleBtn.dataset.active = u.active;
+    toggleBtn.addEventListener('click', function() {
+      toggleUserActive(parseInt(this.dataset.userId), this.dataset.active === 'true');
+    });
+
+    row.appendChild(nameSpan);
+    row.appendChild(roleBadge);
+    row.appendChild(scopeSpan);
+    row.appendChild(tokenSpan);
+    row.appendChild(toggleBtn);
+
+    // Regenerate URL button
+    var regenBtn = document.createElement('button');
+    regenBtn.className = 'btn';
+    regenBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+    regenBtn.textContent = 'New URL';
+    regenBtn.dataset.userId = u.id;
+    regenBtn.dataset.userName = u.name;
+    regenBtn.addEventListener('click', function() {
+      regenerateToken(parseInt(this.dataset.userId), this.dataset.userName);
+    });
+    row.appendChild(regenBtn);
+
+    // Show delete button for non-admin, or admin if there are multiple admins
+    if (u.role !== 'admin' || adminCount > 1) {
+      var delBtn = document.createElement('button');
+      delBtn.className = 'btn';
+      delBtn.style.cssText = 'font-size:11px;padding:3px 8px;color:#c0392b';
+      delBtn.textContent = 'Delete';
+      delBtn.dataset.userId = u.id;
+      delBtn.addEventListener('click', function() {
+        deleteUser(parseInt(this.dataset.userId));
+      });
+      row.appendChild(delBtn);
+    }
+
+    list.appendChild(row);
+  });
 }
 
 async function toggleUserActive(userId, currentActive) {
@@ -1365,6 +1432,44 @@ async function deleteUser(userId) {
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
   });
   loadUserList();
+}
+
+async function regenerateToken(userId, userName) {
+  if (!confirm('Regenerate access URL for "' + userName + '"? The old URL will stop working immediately.')) return;
+  try {
+    // Generate new token
+    const newToken = userName.split(' ').join('') + 'NBS' + Math.floor(Math.random()*9000+1000) + Math.floor(Math.random()*900+100);
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?id=eq.' + userId, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: newToken, updated_at: new Date().toISOString() })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const newUrl = location.origin + location.pathname + '?token=' + newToken;
+    // Show new URL
+    var msg = document.createElement('div');
+    msg.style.cssText = 'margin-top:8px;padding:8px 12px;background:var(--blue-bg);border-radius:var(--radius);font-size:12px;';
+    var label = document.createElement('span');
+    label.style.color = 'var(--blue-text)';
+    label.textContent = 'New URL for ' + userName + ': ';
+    var link = document.createElement('strong');
+    link.style.cssText = 'font-family:monospace;color:var(--blue);font-size:11px';
+    link.textContent = newUrl;
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'btn';
+    copyBtn.style.cssText = 'font-size:11px;padding:2px 8px;margin-left:6px';
+    copyBtn.textContent = 'Copy';
+    copyBtn.dataset.url = newUrl;
+    copyBtn.addEventListener('click', function() { navigator.clipboard.writeText(this.dataset.url); });
+    msg.appendChild(label);
+    msg.appendChild(link);
+    msg.appendChild(document.createTextNode(' '));
+    msg.appendChild(copyBtn);
+    document.getElementById('user-list').insertAdjacentElement('afterend', msg);
+    loadUserList();
+  } catch(e) {
+    alert('Failed to regenerate: ' + e.message);
+  }
 }
 
 function updateNewUserScope() {
