@@ -1326,7 +1326,8 @@ async function createManagerForCountry(countryId, countryName) {
 }
 
 async function loadUserList() {
-  const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?select=id,name,role,token,country_id,site_id,active&order=id.asc', {
+  // hidden=eq.false excludes the recovery admin from the UI entirely
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?select=id,name,role,token,country_id,site_id,active&hidden=eq.false&order=id.asc', {
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
   });
   const users = await resp.json();
@@ -1334,6 +1335,7 @@ async function loadUserList() {
   const roleLabels = { admin: 'Admin', country_manager: 'Country Manager', site_manager: 'Site Manager' };
   const roleClasses = { admin: 'role-admin', country_manager: 'role-country', site_manager: 'role-site' };
   const adminCount = users.filter(x => x.role === 'admin' && x.active).length;
+  const myToken = localStorage.getItem('nbs_token');
 
   list.innerHTML = '';
   users.forEach(u => {
@@ -1361,33 +1363,38 @@ async function loadUserList() {
     tokenSpan.style.cssText = 'font-size:11px;font-family:monospace;background:var(--metric);padding:2px 8px;border-radius:4px;color:var(--muted)';
     tokenSpan.textContent = u.token;
 
-    var toggleBtn = document.createElement('button');
-    toggleBtn.className = 'btn';
-    toggleBtn.style.cssText = 'font-size:11px;padding:3px 8px';
-    toggleBtn.textContent = u.active ? 'Disable' : 'Enable';
-    toggleBtn.dataset.userId = u.id;
-    toggleBtn.dataset.active = u.active;
-    toggleBtn.addEventListener('click', function() {
-      toggleUserActive(parseInt(this.dataset.userId), this.dataset.active === 'true');
-    });
+    // Disable/Enable button — hidden for currently logged-in user (can't disable yourself)
+    if (u.token !== myToken) {
+      var toggleBtn = document.createElement('button');
+      toggleBtn.className = 'btn';
+      toggleBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+      toggleBtn.textContent = u.active ? 'Disable' : 'Enable';
+      toggleBtn.dataset.userId = u.id;
+      toggleBtn.dataset.active = u.active;
+      toggleBtn.addEventListener('click', function() {
+        toggleUserActive(parseInt(this.dataset.userId), this.dataset.active === 'true');
+      });
+      row.appendChild(toggleBtn);
+    }
 
     row.appendChild(nameSpan);
     row.appendChild(roleBadge);
     row.appendChild(scopeSpan);
     row.appendChild(tokenSpan);
-    row.appendChild(toggleBtn);
 
-    // Regenerate URL button
-    var regenBtn = document.createElement('button');
-    regenBtn.className = 'btn';
-    regenBtn.style.cssText = 'font-size:11px;padding:3px 8px';
-    regenBtn.textContent = 'New URL';
-    regenBtn.dataset.userId = u.id;
-    regenBtn.dataset.userName = u.name;
-    regenBtn.addEventListener('click', function() {
-      regenerateToken(parseInt(this.dataset.userId), this.dataset.userName);
-    });
-    row.appendChild(regenBtn);
+    // Regenerate URL button — hidden for the currently logged-in user (self-lockout prevention)
+    if (u.token !== myToken) {
+      var regenBtn = document.createElement('button');
+      regenBtn.className = 'btn';
+      regenBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+      regenBtn.textContent = 'New URL';
+      regenBtn.dataset.userId = u.id;
+      regenBtn.dataset.userName = u.name;
+      regenBtn.addEventListener('click', function() {
+        regenerateToken(parseInt(this.dataset.userId), this.dataset.userName);
+      });
+      row.appendChild(regenBtn);
+    }
 
     // Show delete button for non-admin, or admin if there are multiple admins
     if (u.role !== 'admin' || adminCount > 1) {
