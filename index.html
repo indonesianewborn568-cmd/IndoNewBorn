@@ -58,10 +58,7 @@
   .legend{display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:var(--muted);}
   .swatch{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:middle;}
   .error-banner{background:#fcebeb;color:#791F1F;border:0.5px solid #F09595;border-radius:var(--radius);padding:12px 16px;font-size:13px;margin-bottom:1rem;display:none;}
-  .upload-zone{border:2px dashed var(--border-strong);border-radius:var(--radius-lg);padding:2rem;text-align:center;color:var(--muted);cursor:pointer;margin-bottom:1rem;transition:border-color .2s;}
-  .upload-zone:hover,.upload-zone.drag{border-color:var(--blue);color:var(--blue);}
-  .upload-zone input{display:none;}
-  .upload-status{font-size:13px;margin-top:8px;}
+
   /* Auth overlay */
   .auth-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999;}
   .auth-box{background:var(--surface);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);padding:2.5rem;width:340px;text-align:center;}
@@ -166,7 +163,7 @@
       <button class="tab active" onclick="showPanel('total',this)">Total</button>
       <button class="tab" onclick="showPanel('elevated',this)">Elevated</button>
       <button class="tab" onclick="showPanel('chart',this)">Trend chart</button>
-      <button class="tab" onclick="showPanel('upload',this)">Manual upload</button>
+
     </div>
     <select id="year-select" onchange="loadData()" title="Year"></select>
     <select id="country-select" onchange="onCountryChange()" title="Country">
@@ -208,20 +205,7 @@
       <div style="position:relative;height:300px"><canvas id="trendChart"></canvas></div>
     </div>
   </div>
-  <div id="panel-upload" class="panel">
-    <p class="panel-title">Upload CSV files exported from instrument dashboards</p>
-    <div class="upload-zone" id="drop-zone"
-         onclick="document.getElementById('csv-input').click()"
-         ondragover="event.preventDefault();this.classList.add('drag')"
-         ondragleave="this.classList.remove('drag')"
-         ondrop="handleDrop(event)">
-      <input type="file" id="csv-input" accept=".csv" multiple onchange="handleFiles(this.files)">
-      <div style="font-size:2rem;margin-bottom:8px">&#8659;</div>
-      <div>Drop one or more CSV files here or click to browse</div>
-      <div style="font-size:12px;margin-top:6px">Accepts combined format with Total + Elevated sections. Multiple files supported.</div>
-    </div>
-    <div id="upload-status" class="upload-status"></div>
-  </div>
+
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -964,127 +948,6 @@ async function triggerPush() {
 }
 
 // ── CSV Upload ────────────────────────────────────────────────
-function handleDrop(e) {
-  e.preventDefault();
-  document.getElementById('drop-zone').classList.remove('drag');
-  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
-}
-
-function parseFilename(filename) {
-  let name = filename.replace(/\.csv$/i, '');
-  name = name.replace(/Combined_Annual_Report_/i, '').trim();
-  name = name.replace(/\s*\(\d+\)\s*/g, '').replace(/\s*-\s*copy\s*/gi, '').trim();
-  const yearMatches = [...name.matchAll(/(\d{4})/g)];
-  const year = yearMatches.length ? parseInt(yearMatches[yearMatches.length-1][1]) : curYear;
-  name = name.replace(/[_\s]*\d{4}[_\s]*/g, '').trim();
-  const instr = name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
-  return { instr, year };
-}
-
-function parseCSV(text) {
-  const lines = text.split(/\r?\n/);
-  const totalMap = {}, elevMap = {};
-  let section = null;
-  lines.forEach(raw => {
-    const line = raw.replace(/"/g, '').trim();
-    if (!line || line.startsWith('-')) return;
-    if (line.includes('TOTAL TESTS'))        { section = 'total';    return; }
-    if (line.includes('ELEVATED'))           { section = 'elevated'; return; }
-    if (line.startsWith('Test name'))        return;
-    if (line.startsWith('Changed database')) return;
-    if (!section) return;
-    const cols = line.split(',').map(c => c.trim());
-    const testName = cols[0];
-    if (!testName || testName === 'Total' || testName === ' ') return;
-    for (let m = 0; m < 12; m++) {
-      const count = parseInt(cols[m+1]) || 0;
-      if (count > 0) {
-        const key = testName + '|' + (m+1);
-        if (section === 'total')    totalMap[key] = (totalMap[key]||0) + count;
-        if (section === 'elevated') elevMap[key]  = (elevMap[key] ||0) + count;
-      }
-    }
-  });
-  return { totalMap, elevMap };
-}
-
-async function getOrCreateInstrumentId(instrName) {
-  if (window._instrIdCache[instrName]) return window._instrIdCache[instrName];
-  const found = window._instruments.find(i => i.display_name === instrName);
-  if (found) {
-    window._instrIdCache[instrName] = found.id;
-    return found.id;
-  }
-  const { data, error } = await _sb.from('instruments')
-    .upsert({ hostname: instrName, display_name: instrName }, { onConflict: 'hostname' })
-    .select('id').single();
-  if (error) throw new Error('Could not register instrument: ' + JSON.stringify(error));
-  window._instrIdCache[instrName] = data.id;
-  window._instruments.push({ id: data.id, hostname: instrName, display_name: instrName });
-  return data.id;
-}
-
-async function handleFiles(files) {
-  if (!files || files.length === 0) return;
-  const status = document.getElementById('upload-status');
-  status.innerHTML = 'Processing ' + files.length + ' file(s)...<br>';
-  let anySuccess = false;
-
-  for (const file of Array.from(files)) {
-    if (!file.name.endsWith('.csv')) {
-      status.innerHTML += '<div style="color:orange">⚠ Skipped ' + file.name + ' (not a CSV)</div>';
-      continue;
-    }
-    try {
-      const { instr: autoInstr, year: autoYear } = parseFilename(file.name);
-      // Auto-detected from filename -- no prompt needed
-      status.innerHTML += '<div style="color:gray">Processing: ' + autoInstr + ' (' + autoYear + ')...</div>';
-
-      const text = await file.text();
-      const { totalMap, elevMap } = parseCSV(text);
-      const instrId = await getOrCreateInstrumentId(autoInstr);
-
-      const allKeys = new Set([...Object.keys(totalMap), ...Object.keys(elevMap)]);
-      const rows = [];
-      const now = new Date().toISOString();
-      allKeys.forEach(key => {
-        const [testName, monthStr] = key.split('|');
-        rows.push({
-          instrument_id:  instrId,
-          test_name:      testName,
-          year:           autoYear,
-          month:          parseInt(monthStr),
-          total_count:    totalMap[key] || 0,
-          elevated_count: elevMap[key]  || 0,
-          pushed_at:      now
-        });
-      });
-
-      if (rows.length === 0) {
-        status.innerHTML += '<div style="color:orange">⚠ ' + file.name + ': No data found.</div>';
-        continue;
-      }
-
-      for (let i = 0; i < rows.length; i += 100) {
-        const chunk = rows.slice(i, i+100);
-        const { error } = await _sb.from('test_results').upsert(chunk, {
-          onConflict: 'instrument_id,test_name,year,month',
-          ignoreDuplicates: false
-        });
-        if (error) throw new Error(JSON.stringify(error));
-      }
-      status.innerHTML += '<div style="color:green">✓ ' + autoInstr + ' (' + autoYear + '): ' + rows.length + ' rows uploaded.</div>';
-      anySuccess = true;
-    } catch(e) {
-      status.innerHTML += '<div style="color:red">✗ ' + file.name + ': ' + e.message + '</div>';
-    }
-  }
-
-  if (anySuccess) {
-    status.innerHTML += '<div style="margin-top:8px;color:var(--muted)">Refreshing dashboard...</div>';
-    await init();
-  }
-}
 
 // ── Pending instrument config banner ─────────────────────────
 function showPendingBanner(unassigned) {
