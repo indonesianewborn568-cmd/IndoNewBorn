@@ -475,8 +475,8 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
     const months = MONTHS.map((_,i) => dataMap[name+'|'+(i+1)] || 0);
     const ytd = months.reduce((a,b)=>a+b,0);
     grandTotal += ytd;
-    let r = '<tr><td title="MSMS panel, represented by C0" style="cursor:pointer" onclick="toggleMsmsPanel(this)">' +
-            '<span id="msms-caret" style="display:inline-block;width:14px">&#9656;</span> MSMS Panel (C0)</td>';
+    let r = '<tr><td title="Neobase 2, represented by C0" style="cursor:pointer" onclick="toggleMsmsPanel(this)">' +
+            '<span id="msms-caret" style="display:inline-block;width:14px">&#9656;</span> Neobase 2 (C0)</td>';
     months.forEach((v,i) => {
       colTotals[i] += v;
       r += '<td' + (i===curMonth?' class="cur"':'') + '>' + (v||'—') + '</td>';
