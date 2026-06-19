@@ -134,6 +134,19 @@
       </div>
       <div id="new-user-token" style="margin-top:10px;font-size:12px;color:var(--muted);display:none;"></div>
     </div>
+
+    <!-- Country management -->
+    <div style="margin-top:14px;padding-top:14px;border-top:0.5px solid var(--border)">
+      <div style="font-size:13px;font-weight:500;margin-bottom:10px;">Countries</div>
+      <div id="country-mgmt-list" style="margin-bottom:10px;font-size:13px;"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="new-country-name" type="text" placeholder="New country name (e.g. Malaysia)"
+          style="font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:220px;"
+          onkeydown="if(event.key==='Enter') addCountry()">
+        <button class="btn btn-primary" onclick="addCountry()" style="font-size:12px;padding:6px 14px;">Add country</button>
+      </div>
+      <div id="new-country-token" style="margin-top:10px;font-size:12px;color:var(--muted);display:none;"></div>
+    </div>
   </div>
 
   <div id="config-panel" style="display:none;background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;">
@@ -1188,7 +1201,87 @@ function toggleUserPanel() {
   const panel = document.getElementById('user-panel');
   const isVisible = panel.style.display !== 'none';
   panel.style.display = isVisible ? 'none' : 'block';
-  if (!isVisible) loadUserList();
+  if (!isVisible) { loadUserList(); loadCountryMgmt(); }
+}
+
+async function loadCountryMgmt() {
+  const list = document.getElementById('country-mgmt-list');
+  const countries = window._countries || [];
+  if (countries.length === 0) { list.innerHTML = '<span style="color:var(--muted)">No countries yet.</span>'; return; }
+  list.innerHTML = countries.map(c =>
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
+    '<span style="min-width:140px">' + c.country_name + '</span>' +
+    '<button class="btn" onclick="renameCountry(' + c.id + ','' + c.country_name + '')" style="font-size:11px;padding:3px 8px;">&#9998; Rename</button>' +
+    '<button class="btn" onclick="createManagerForCountry(' + c.id + ','' + c.country_name + '')" style="font-size:11px;padding:3px 8px;">&#128279; Get URL</button>' +
+    '</div>'
+  ).join('');
+}
+
+async function addCountry() {
+  const name = document.getElementById('new-country-name').value.trim();
+  if (!name) { alert('Please enter a country name.'); return; }
+  try {
+    const { data: existing } = await _sb.from('countries').select('id').eq('country_name', name).single();
+    if (existing) { alert('"' + name + '" already exists.'); return; }
+    const { error } = await _sb.from('countries').insert({ country_name: name });
+    if (error) throw new Error(JSON.stringify(error));
+    document.getElementById('new-country-name').value = '';
+    // Refresh countries in memory
+    const { data: updated } = await _sb.from('countries').select('id,country_name').order('country_name');
+    window._countries = updated || [];
+    // Refresh country dropdown
+    const csel = document.getElementById('country-select');
+    const curVal = csel.value;
+    csel.innerHTML = '<option value="all">All countries</option>';
+    window._countries.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.id; o.textContent = c.country_name;
+      csel.appendChild(o);
+    });
+    csel.value = curVal;
+    loadCountryMgmt();
+    // Show success and offer to create manager URL
+    const tokenDiv = document.getElementById('new-country-token');
+    tokenDiv.style.display = 'block';
+    tokenDiv.innerHTML = 'Country "' + name + '" added! <button class="btn btn-primary" onclick="createManagerForCountry(' +
+      window._countries.find(c=>c.country_name===name)?.id + ','' + name + '')" style="font-size:11px;padding:3px 10px;margin-left:6px">Create manager URL</button>';
+  } catch(e) {
+    alert('Failed: ' + e.message);
+  }
+}
+
+async function renameCountry(countryId, currentName) {
+  const newName = prompt('Rename "' + currentName + '" to:', currentName);
+  if (!newName || newName.trim() === currentName) return;
+  try {
+    const { error } = await _sb.from('countries').update({ country_name: newName.trim(), updated_at: new Date().toISOString() }).eq('id', countryId);
+    if (error) throw new Error(JSON.stringify(error));
+    const { data: updated } = await _sb.from('countries').select('id,country_name').order('country_name');
+    window._countries = updated || [];
+    loadCountryMgmt();
+    await init();
+  } catch(e) {
+    alert('Rename failed: ' + e.message);
+  }
+}
+
+async function createManagerForCountry(countryId, countryName) {
+  const token = countryName.replace(/\s+/g,'') + 'NBS' + Math.floor(Math.random()*9000+1000);
+  try {
+    const { error } = await _sb.from('dashboard_users').insert({
+      name: countryName, token, role: 'country_manager', country_id: countryId
+    });
+    if (error) throw new Error(JSON.stringify(error));
+    const accessUrl = location.origin + location.pathname + '?token=' + token;
+    const tokenDiv = document.getElementById('new-country-token');
+    tokenDiv.style.display = 'block';
+    tokenDiv.innerHTML = countryName + ' manager URL:<br>' +
+      '<strong style="font-family:monospace;color:var(--blue);font-size:11px">' + accessUrl + '</strong> ' +
+      '<button class="btn" onclick="navigator.clipboard.writeText(this.dataset.url)" data-url="' + accessUrl + '" style="font-size:11px;padding:2px 8px;margin-left:6px">Copy</button>';
+    loadUserList();
+  } catch(e) {
+    alert('Failed: ' + e.message);
+  }
 }
 
 async function loadUserList() {
