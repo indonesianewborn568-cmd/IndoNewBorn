@@ -519,7 +519,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     if (name !== 'C0') rows += renderRow(name, true);
   });
 
-  rows += '<tr class="total-row"><td>Total' + (isTotalsTab ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS panel counted via Neobase 2)</span>' : '') + '</td>';
+  rows += '<tr class="total-row"><td>Total' + (isTotalsTab && hasMsmsInstrument ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS panel counted via Neobase 2)</span>' : '') + '</td>';
   colTotals.forEach((v,i) => rows += '<td' + (i===curMonth?' style="color:var(--blue)"':'') + '>' + v.toLocaleString() + '</td>');
   rows += '<td>' + grandTotal.toLocaleString() + '</td></tr>';
   tbody.innerHTML = rows;
