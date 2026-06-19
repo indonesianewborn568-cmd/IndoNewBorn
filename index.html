@@ -1010,6 +1010,13 @@ function showConfigPanel() {
       cnameNew.style.display = this.value === '__new__' ? 'inline-block' : 'none';
     });
 
+    // Instrument type dropdown
+    var typeSelect = document.createElement('select');
+    typeSelect.id = 'itype_' + c.id;
+    typeSelect.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:130px;';
+    typeSelect.innerHTML = '<option value="standard">Standard</option><option value="msms">MSMS</option>';
+    if (c.instrument_type === 'msms') typeSelect.value = 'msms';
+
     var saveBtn = document.createElement('button');
     saveBtn.className = 'btn btn-primary';
     saveBtn.style.cssText = 'font-size:12px;padding:6px 12px;';
@@ -1023,6 +1030,7 @@ function showConfigPanel() {
     row.appendChild(hostnameSpan);
     row.appendChild(dnameInput);
     row.appendChild(snameInput);
+    row.appendChild(typeSelect);
     row.appendChild(cnameSelect);
     row.appendChild(cnameNew);
     row.appendChild(saveBtn);
@@ -1033,6 +1041,7 @@ function showConfigPanel() {
 async function saveInstrumentConfig(configId, hostname) {
   const displayName  = document.getElementById('dname_' + configId).value.trim();
   const siteName     = document.getElementById('sname_' + configId).value.trim();
+  const instrType    = document.getElementById('itype_' + configId) ? document.getElementById('itype_' + configId).value : 'standard';
   const countrySelect = document.getElementById('cname_' + configId);
   const countryNewInput = document.getElementById('cname_new_' + configId);
   const countryName = countrySelect.value === '__new__'
@@ -1044,7 +1053,7 @@ async function saveInstrumentConfig(configId, hostname) {
   try {
     // Update instrument_config
     const { error: cfgErr } = await _sb.from('instrument_config')
-      .update({ display_name: displayName, site_name: siteName, updated_at: new Date().toISOString() })
+      .update({ display_name: displayName, site_name: siteName, instrument_type: instrType, updated_at: new Date().toISOString() })
       .eq('id', configId);
     if (cfgErr) throw new Error(JSON.stringify(cfgErr));
 
