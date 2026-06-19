@@ -476,7 +476,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
     const ytd = months.reduce((a,b)=>a+b,0);
     grandTotal += ytd;
     let r = '<tr><td title="Neobase 2, represented by Asa-Total" style="cursor:pointer" onclick="toggleMsmsPanel(this)">' +
-            '<span id="msms-caret" style="display:inline-block;width:14px">&#9656;</span> Neobase 2 (Asa-Total)</td>';
+            '<span id="msms-caret" style="display:inline-block;width:14px">&#9656;</span> Neobase 2 (' + name + ')</td>';
     months.forEach((v,i) => {
       colTotals[i] += v;
       r += '<td' + (i===curMonth?' class="cur"':'') + '>' + (v||'—') + '</td>';
@@ -487,7 +487,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
 
   let rows = '';
   regularTests.forEach(name => {
-    if (isTotalsTab && name === 'C0') {
+    if (isTotalsTab && (name === 'C0' || name === 'Asa-Total')) {
       rows += renderC0SummaryRow(name);
     } else {
       rows += renderRow(name, false);
