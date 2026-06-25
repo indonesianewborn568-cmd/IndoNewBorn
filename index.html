@@ -70,22 +70,23 @@
   .role-admin{background:#e8f5e9;color:#2e7d32;}
   .role-country{background:#e3f2fd;color:#1565c0;}
   .role-site{background:#fff3e0;color:#e65100;}
-  /* Full push button — amber, admin only */
+  /* Push All button — amber, admin only */
   .btn-push-admin{background:#b45309;color:#fff;border-color:#92400e;font-weight:500;}
   .btn-push-admin:hover{opacity:.88;background:#92400e;}
   /* Push modal */
   .push-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9990;display:flex;align-items:center;justify-content:center;}
-  .push-modal{background:var(--surface);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);padding:2rem;width:480px;max-width:95vw;box-shadow:0 12px 40px rgba(0,0,0,0.25);}
+  .push-modal{background:var(--surface);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);padding:2rem;width:560px;max-width:95vw;box-shadow:0 12px 40px rgba(0,0,0,0.25);}
   .push-modal h3{font-size:16px;font-weight:600;margin-bottom:6px;}
-  .push-modal-warn{background:#fff7ed;border:0.5px solid #fed7aa;border-radius:var(--radius);padding:12px 14px;font-size:13px;color:#7c2d12;margin:14px 0;line-height:1.55;}
+  .push-modal-warn{background:#fff7ed;border:0.5px solid #fed7aa;border-radius:var(--radius);padding:12px 14px;font-size:13px;color:#7c2d12;margin:14px 0;line-height:1.6;}
   .push-modal-warn strong{display:block;margin-bottom:4px;font-size:13px;}
-  .push-instr-list{max-height:160px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 10px;margin-bottom:14px;font-size:12px;background:var(--metric);}
-  .push-instr-row{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--border);}
+  .push-instr-list{max-height:200px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:6px 8px;margin-bottom:14px;font-size:12px;background:var(--metric);}
+  .push-instr-row{display:grid;grid-template-columns:1fr 90px 80px 90px;gap:6px;align-items:center;padding:5px 2px;border-bottom:0.5px solid var(--border);}
   .push-instr-row:last-child{border-bottom:none;}
-  .push-status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;}
+  .push-status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;display:inline-block;margin-right:5px;}
   .push-status-dot.pending{background:#e08c1a;animation:pulse 1.2s ease-in-out infinite;}
   .push-status-dot.ok{background:#3c9e5f;}
   .push-status-dot.err{background:#c0392b;}
+  .push-reset-chk{accent-color:#b45309;width:14px;height:14px;cursor:pointer;display:block;margin:0 auto;}
   .push-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px;}
   /* User management panel */
   .user-panel{background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;}
@@ -200,7 +201,7 @@
     <button class="btn" id="show-delinked-btn" onclick="toggleShowDelinked()" style="font-size:11px;color:var(--muted)" title="Show delinked instruments for management">&#128274; Delinked</button>
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="manage-users-btn" onclick="toggleUserPanel()" style="display:none" title="Manage user access">&#128100; Users</button>
-    <button class="btn btn-push-admin" id="push-btn" onclick="openPushModal()" style="display:none" title="Admin only — trigger push from all instrument PCs">&#8593; Full Push</button>
+    <button class="btn btn-push-admin" id="push-btn" onclick="openPushModal()" style="display:none" title="Admin only — trigger incremental push on all instrument PCs">&#8593; Push All</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
   </div>
@@ -225,26 +226,27 @@
 
 </div>
 
-<!-- Full Push Modal (admin only) -->
+<!-- Push All Modal (admin only) -->
 <div id="push-modal" class="push-modal-overlay" style="display:none">
   <div class="push-modal">
-    <h3>⚠ Full Push — All Instruments</h3>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:0">Trigger a data push from every active instrument PC via its webhook listener.</p>
+    <h3>&#8593; Push All — Incremental</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:0">Signal each active instrument PC to push data since its last push date.</p>
     <div class="push-modal-warn">
-      <strong>Before you proceed, read this:</strong>
-      Each instrument PC must be <strong>online</strong> and running <strong>Webhook-Listener.ps1</strong> for the push to reach it.
-      Pushes are <strong>incremental</strong> — only data since the last push date is sent. A full historical re-push is not triggered here.
-      The dashboard will auto-refresh 45 seconds after sending all signals.
-      Instruments without a configured webhook URL will be skipped.
+      <strong>How this works:</strong>
+      Each PC runs its own <code style="font-size:12px">Push-ToCloud.ps1</code> in the background — only data since <em>last pushed</em> is sent, so it is fast.
+      The PC must be <strong>online</strong> and the <strong>LifeCycleWebhook</strong> scheduled task must be running (port 5001).
+      To force a full historical re-push for a specific instrument, tick <strong>Reset → Full</strong> on that row — this clears its last-push date before signalling.
     </div>
-    <div style="font-size:12px;font-weight:500;margin-bottom:6px;color:var(--muted)">ACTIVE INSTRUMENTS</div>
+    <div style="font-size:11px;font-weight:500;color:var(--muted);margin-bottom:6px;display:grid;grid-template-columns:1fr 90px 80px 90px;gap:6px;padding:0 2px">
+      <span>Instrument</span><span>Last pushed</span><span style="text-align:center">Reset→Full</span><span style="text-align:right">Status</span>
+    </div>
     <div class="push-instr-list" id="push-instr-list">
       <span style="color:var(--muted)">Loading…</span>
     </div>
     <div id="push-modal-result" style="font-size:12px;color:var(--muted);min-height:18px;margin-bottom:10px;display:none"></div>
     <div class="push-modal-actions">
       <button class="btn" id="push-cancel-btn" onclick="closePushModal()">Cancel</button>
-      <button class="btn btn-push-admin" id="push-confirm-btn" onclick="executePush()">Send Push Signal</button>
+      <button class="btn btn-push-admin" id="push-confirm-btn" onclick="executePush()">&#8593; Send Push Signals</button>
     </div>
   </div>
 </div>
@@ -969,30 +971,63 @@ function exportCSV() {
   a.click();
 }
 
-// ── Full Push modal (admin only) ──────────────────────────────
-function openPushModal() {
-  // Populate instrument list from window._instruments
-  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
-  const listEl = document.getElementById('push-instr-list');
-  if (activeInstrs.length === 0) {
-    listEl.innerHTML = '<span style="color:var(--muted)">No active instruments found.</span>';
-  } else {
-    listEl.innerHTML = activeInstrs.map(i => {
-      const site = (window._sites || []).find(s => s.id == i.site_id);
-      const siteLabel = site ? site.site_name : '(no site)';
-      return '<div class="push-instr-row" id="push-row-' + i.id + '">' +
-        '<span class="push-status-dot" id="push-dot-' + i.id + '"></span>' +
-        '<span style="flex:1;font-weight:500">' + i.display_name + '</span>' +
-        '<span style="color:var(--muted)">' + siteLabel + '</span>' +
-        '<span id="push-lbl-' + i.id + '" style="color:var(--muted);font-size:11px;min-width:70px;text-align:right">—</span>' +
-      '</div>';
-    }).join('');
-  }
+// ── Push All modal (admin only) ───────────────────────────────
+async function openPushModal() {
+  document.getElementById('push-modal').style.display = 'flex';
   document.getElementById('push-modal-result').style.display = 'none';
   document.getElementById('push-confirm-btn').disabled = false;
-  document.getElementById('push-confirm-btn').textContent = 'Send Push Signal';
+  document.getElementById('push-confirm-btn').textContent = '↑ Send Push Signals';
   document.getElementById('push-cancel-btn').textContent = 'Cancel';
-  document.getElementById('push-modal').style.display = 'flex';
+
+  const listEl = document.getElementById('push-instr-list');
+  listEl.innerHTML = '<span style="color:var(--muted)">Loading last push times…</span>';
+
+  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
+  if (activeInstrs.length === 0) {
+    listEl.innerHTML = '<span style="color:var(--muted)">No active instruments found.</span>';
+    return;
+  }
+
+  // Fetch instrument_config to get last_pushed_at for each hostname
+  let configMap = {};
+  try {
+    const cfgResp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?select=hostname,last_pushed_at', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    const cfgs = await cfgResp.json();
+    (cfgs || []).forEach(c => { configMap[c.hostname] = c; });
+  } catch(e) { /* non-fatal — show dashes */ }
+
+  listEl.innerHTML = activeInstrs.map(i => {
+    const isLegacy = !i.hostname ||
+      i.hostname === i.display_name ||
+      !/^[A-Za-z0-9\-]+$/.test(i.hostname);
+
+    const cfg = configMap[i.hostname];
+    let lastLabel, lastColor;
+    if (isLegacy) {
+      lastLabel = 'legacy'; lastColor = 'var(--muted)';
+    } else if (cfg && cfg.last_pushed_at) {
+      const d = new Date(cfg.last_pushed_at);
+      lastLabel = d.toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'2-digit' });
+      lastColor = 'var(--text)';
+    } else {
+      lastLabel = 'never'; lastColor = '#c0392b';
+    }
+
+    const resetCell = isLegacy
+      ? '<span style="color:var(--muted);font-size:11px;text-align:center;display:block">—</span>'
+      : '<input type="checkbox" class="push-reset-chk" id="reset-chk-' + i.id + '" title="Clear last-push date so this instrument does a full historical re-push">';
+
+    return '<div class="push-instr-row" id="push-row-' + i.id + '">' +
+      '<span><span class="push-status-dot" id="push-dot-' + i.id + '"></span>' +
+        '<span style="font-weight:500">' + i.display_name + '</span></span>' +
+      '<span id="push-last-' + i.id + '" style="color:' + lastColor + ';font-size:11px">' + lastLabel + '</span>' +
+      '<span style="text-align:center">' + resetCell + '</span>' +
+      '<span id="push-lbl-' + i.id + '" style="color:var(--muted);font-size:11px;text-align:right">' +
+        (isLegacy ? 'skip' : '—') + '</span>' +
+    '</div>';
+  }).join('');
 }
 
 function closePushModal() {
@@ -1015,25 +1050,45 @@ async function executePush() {
   for (const instr of activeInstrs) {
     const dotEl = document.getElementById('push-dot-' + instr.id);
     const lblEl = document.getElementById('push-lbl-' + instr.id);
+    const lastEl = document.getElementById('push-last-' + instr.id);
+
+    // Skip legacy CSV-imported instruments (hostname === display_name)
+    const isLegacy = !instr.hostname ||
+      instr.hostname === instr.display_name ||
+      !/^[A-Za-z0-9\-]+$/.test(instr.hostname);
+    if (isLegacy) { skipped++; continue; }
+
     if (dotEl) dotEl.className = 'push-status-dot pending';
-    if (lblEl) lblEl.textContent = 'Sending…';
+    if (lblEl) lblEl.style.color = 'var(--muted)', lblEl.textContent = 'Sending…';
 
-    // Look up webhook URL from instrument_config by hostname
-    const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
-    const webhookUrl = cfg && cfg.webhook_url ? cfg.webhook_url : null;
-
-    if (!webhookUrl) {
-      if (dotEl) dotEl.className = 'push-status-dot';
-      if (lblEl) lblEl.style.color = 'var(--muted)', lblEl.textContent = 'No webhook';
-      skipped++;
-      continue;
+    // If "Reset → Full" is checked, clear last_pushed_at so the PC does a full historical push
+    const resetChk = document.getElementById('reset-chk-' + instr.id);
+    if (resetChk && resetChk.checked) {
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/instrument_config?hostname=eq.' + encodeURIComponent(instr.hostname), {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({ last_pushed_at: null })
+        });
+        if (lastEl) lastEl.textContent = 'reset ↺';
+      } catch(e) {
+        if (lblEl) lblEl.style.color = '#c0392b', lblEl.textContent = 'Reset failed';
+        failed++; continue;
+      }
     }
 
+    // Signal the instrument PC via its webhook listener (port 5001)
+    const webhookUrl = 'http://' + instr.hostname + ':5001/push';
     try {
-      // fire-and-forget — no-cors so we can't read the response
       await fetch(webhookUrl, { method: 'GET', mode: 'no-cors', signal: AbortSignal.timeout(8000) });
       if (dotEl) dotEl.className = 'push-status-dot ok';
-      if (lblEl) lblEl.style.color = '#3c9e5f', lblEl.textContent = 'Signal sent';
+      if (lblEl) lblEl.style.color = '#3c9e5f';
+      lblEl.textContent = resetChk && resetChk.checked ? 'Full push sent' : 'Sent';
       sent++;
     } catch(e) {
       if (dotEl) dotEl.className = 'push-status-dot err';
@@ -1042,20 +1097,16 @@ async function executePush() {
     }
   }
 
-  // Summary
   resultEl.style.display = 'block';
   resultEl.style.color = failed > 0 ? '#c0392b' : '#3c9e5f';
-  resultEl.textContent = 'Done — ' + sent + ' signal(s) sent, ' +
-    skipped + ' skipped (no webhook), ' + failed + ' unreachable. ' +
-    (sent > 0 ? 'Dashboard will refresh in 45 s.' : '');
+  resultEl.textContent = 'Done — ' + sent + ' signal(s) sent' +
+    (skipped > 0 ? ', ' + skipped + ' legacy skipped' : '') +
+    (failed > 0  ? ', ' + failed + ' unreachable' : '') + '.' +
+    (sent > 0 ? ' Dashboard refreshes in 45 s.' : '');
 
   confirmBtn.textContent = 'Done';
-
   if (sent > 0) {
-    setTimeout(async () => {
-      closePushModal();
-      await init();
-    }, 45000);
+    setTimeout(async () => { closePushModal(); await init(); }, 45000);
   }
 }
 
