@@ -403,7 +403,7 @@ async function init() {
     }
 
     // Check for unassigned instruments (in instrument_config but not yet configured)
-    const configs = await sbFrom('instrument_config', { select: 'id,hostname,display_name,site_name', order: 'hostname.asc' });
+    const configs = await sbFrom('instrument_config', { select: 'id,hostname,display_name,site_name,instrument_type', order: 'hostname.asc' });
     window._instrConfigs = configs || [];
     const unassigned = configs.filter(c => !c.site_name);
     if (unassigned.length > 0) {
@@ -459,8 +459,18 @@ async function loadData() {
     });
 
     const tests = [...testNames].sort();
-    const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year, true);
-    const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year, false);
+
+    // Detect if any MSMS instrument is in the current view by checking
+    // instrument_type from instrument_config against the instrument IDs in this data
+    const activeInstrIdsForMsms = new Set((rows || []).map(r => r.instrument_id));
+    const hasMsms = (window._instruments || []).some(instr => {
+      if (!activeInstrIdsForMsms.has(instr.id)) return false;
+      const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
+      return cfg && cfg.instrument_type === 'msms';
+    });
+
+    const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year, true,  hasMsms);
+    const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year, false, hasMsms);
 
     document.getElementById('m-total').textContent    = totStats.grandTotal.toLocaleString();
     document.getElementById('m-elevated').textContent = Object.values(elevMap).reduce((a,b)=>a+b,0).toLocaleString();
@@ -482,7 +492,7 @@ async function loadData() {
 }
 
 // ── Build table ───────────────────────────────────────────────
-function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
+function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms) {
   const thead = document.getElementById(theadId);
   const tbody = document.getElementById(tbodyId);
   const colTotals = Array(12).fill(0);
@@ -532,10 +542,10 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
   let rows = '';
   regularTests.forEach(name => {
     // Treat Asa-Total (or C0) as the Neobase 2 collapsible summary row when
-    // MSMS analytes are present in the data (i.e. this is an MSMS instrument view).
-    // If no MSMS analytes exist alongside it (pure GSP view), show as a plain row.
+    // the view includes an MSMS instrument (detected from instrument_config.instrument_type).
+    // Falls back to plain row for GSP instruments that also happen to run Asa-Total.
     const isNeobase2Representative = isTotalsTab &&
-      (name === 'C0' || (name === 'Asa-Total' && msmsTests.length > 0));
+      (name === 'C0' || (name === 'Asa-Total' && hasMsms));
     if (isNeobase2Representative) {
       rows += renderC0SummaryRow(name);
     } else {
