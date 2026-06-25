@@ -707,59 +707,126 @@ async function moveInstrument() {
   const currentSite = (window._sites || []).find(s => s.id == current.site_id);
   const currentCountry = currentSite ? (window._countries || []).find(c => c.id == currentSite.country_id) : null;
 
-  const newSiteName = prompt(
-    'Move "' + current.display_name + '" to a different site. Current site: ' + (currentSite ? currentSite.site_name : 'none') + '. Enter the NEW site name (existing or new):',
-    currentSite ? currentSite.site_name : ''
-  );
-  if (!newSiteName || newSiteName.trim() === '') return;
-  const siteNameTrimmed = newSiteName.trim();
+  // Build modal
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--surface);border-radius:var(--radius-lg);padding:1.5rem;width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
 
-  const newCountryName = prompt(
-    'Country for "' + siteNameTrimmed + '". Current country: ' + (currentCountry ? currentCountry.country_name : 'none') + '. Enter country name (existing or new, leave blank to keep unset):',
-    currentCountry ? currentCountry.country_name : ''
-  );
-  const countryNameTrimmed = (newCountryName || '').trim();
+  var title = document.createElement('div');
+  title.style.cssText = 'font-size:14px;font-weight:500;margin-bottom:4px;';
+  title.textContent = 'Move "' + current.display_name + '"';
+  var subtitle = document.createElement('div');
+  subtitle.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:14px;';
+  subtitle.textContent = 'Current: ' + (currentSite ? currentSite.site_name : 'none') + (currentCountry ? ', ' + currentCountry.country_name : '');
 
-  try {
-    let countryId = currentSite ? currentSite.country_id : null;
-    if (countryNameTrimmed) {
-      const { data: existingCountry } = await _sb.from('countries').select('id').eq('country_name', countryNameTrimmed).single();
-      if (existingCountry) {
-        countryId = existingCountry.id;
-      } else {
-        const { data: newCountry, error: cErr } = await _sb.from('countries')
-          .insert({ country_name: countryNameTrimmed }).select('id').single();
-        if (cErr) throw new Error(JSON.stringify(cErr));
-        countryId = newCountry.id;
+  // Site dropdown
+  var siteLabel = document.createElement('div');
+  siteLabel.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:4px;';
+  siteLabel.textContent = 'Site';
+  var siteSelect = document.createElement('select');
+  siteSelect.style.cssText = 'width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);margin-bottom:8px;';
+  siteSelect.innerHTML = '<option value="">Select site</option>' +
+    (window._sites || []).map(s => '<option value="' + s.id + '"' + (currentSite && currentSite.id == s.id ? ' selected' : '') + '>' + s.site_name + '</option>').join('') +
+    '<option value="__new__">+ Add new site...</option>';
+
+  var siteNewInput = document.createElement('input');
+  siteNewInput.type = 'text';
+  siteNewInput.placeholder = 'New site name';
+  siteNewInput.style.cssText = 'width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);margin-bottom:8px;display:none;';
+
+  // Country dropdown
+  var countryLabel = document.createElement('div');
+  countryLabel.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:4px;';
+  countryLabel.textContent = 'Country';
+  var countrySelect = document.createElement('select');
+  countrySelect.style.cssText = 'width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);margin-bottom:8px;';
+  countrySelect.innerHTML = '<option value="">Select country</option>' +
+    (window._countries || []).map(c => '<option value="' + c.id + '"' + (currentCountry && currentCountry.id == c.id ? ' selected' : '') + '>' + c.country_name + '</option>').join('') +
+    '<option value="__new__">+ Add new country...</option>';
+
+  var countryNewInput = document.createElement('input');
+  countryNewInput.type = 'text';
+  countryNewInput.placeholder = 'New country name';
+  countryNewInput.style.cssText = 'width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);margin-bottom:12px;display:none;';
+
+  // Auto-fill country when existing site selected
+  siteSelect.addEventListener('change', function() {
+    siteNewInput.style.display = this.value === '__new__' ? 'block' : 'none';
+    if (this.value && this.value !== '__new__') {
+      var chosenSite = (window._sites || []).find(s => s.id == this.value);
+      if (chosenSite && chosenSite.country_id) {
+        countrySelect.value = chosenSite.country_id;
+        countryNewInput.style.display = 'none';
       }
     }
+  });
+  countrySelect.addEventListener('change', function() {
+    countryNewInput.style.display = this.value === '__new__' ? 'block' : 'none';
+  });
 
-    let siteId;
-    const { data: existingSite } = await _sb.from('sites').select('id,country_id').eq('site_name', siteNameTrimmed).single();
-    if (existingSite) {
-      siteId = existingSite.id;
-      if (countryId && !existingSite.country_id) {
+  var btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn'; cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', function() { document.body.removeChild(overlay); });
+  var saveBtn = document.createElement('button');
+  saveBtn.className = 'btn btn-primary'; saveBtn.textContent = 'Move';
+  saveBtn.addEventListener('click', async function() {
+    try {
+      // Resolve site
+      let siteId, siteNameResolved;
+      if (siteSelect.value === '__new__') {
+        siteNameResolved = siteNewInput.value.trim();
+        if (!siteNameResolved) { alert('Please enter a site name.'); return; }
+      } else if (siteSelect.value) {
+        siteId = parseInt(siteSelect.value);
+        siteNameResolved = (window._sites || []).find(s => s.id == siteId)?.site_name || '';
+      } else { alert('Please select a site.'); return; }
+
+      // Resolve country
+      let countryId;
+      if (countrySelect.value === '__new__') {
+        const newCName = countryNewInput.value.trim();
+        if (!newCName) { alert('Please enter a country name.'); return; }
+        const { data: nc, error: cErr } = await _sb.from('countries').insert({ country_name: newCName }).select('id').single();
+        if (cErr) throw new Error(JSON.stringify(cErr));
+        countryId = nc.id;
+      } else if (countrySelect.value) {
+        countryId = parseInt(countrySelect.value);
+      }
+
+      // Create new site if needed
+      if (!siteId) {
+        const sitePayload = { site_name: siteNameResolved };
+        if (countryId) sitePayload.country_id = countryId;
+        const { data: ns, error: sErr } = await _sb.from('sites').insert(sitePayload).select('id').single();
+        if (sErr) throw new Error(JSON.stringify(sErr));
+        siteId = ns.id;
+      } else if (countryId) {
+        // Update country on existing site if changed
         await _sb.from('sites').update({ country_id: countryId }).eq('id', siteId);
       }
-    } else {
-      const sitePayload = { site_name: siteNameTrimmed };
-      if (countryId) sitePayload.country_id = countryId;
-      const { data: newSite, error: sErr } = await _sb.from('sites')
-        .insert(sitePayload).select('id').single();
-      if (sErr) throw new Error(JSON.stringify(sErr));
-      siteId = newSite.id;
-    }
 
-    const { error: instrErr } = await _sb.from('instruments')
-      .update({ site_id: siteId, updated_at: new Date().toISOString() })
-      .eq('id', instrId);
-    if (instrErr) throw new Error(JSON.stringify(instrErr));
+      const { error: instrErr } = await _sb.from('instruments')
+        .update({ site_id: siteId, updated_at: new Date().toISOString() })
+        .eq('id', instrId);
+      if (instrErr) throw new Error(JSON.stringify(instrErr));
 
-    alert('Moved "' + current.display_name + '" to "' + siteNameTrimmed + '"' + (countryNameTrimmed ? ' in ' + countryNameTrimmed : '') + '.');
-    await init();
-  } catch(e) {
-    alert('Move failed: ' + e.message);
-  }
+      document.body.removeChild(overlay);
+      alert('Moved "' + current.display_name + '" to "' + siteNameResolved + '" successfully.');
+      await init();
+    } catch(e) { alert('Move failed: ' + e.message); }
+  });
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(saveBtn);
+  box.appendChild(title); box.appendChild(subtitle);
+  box.appendChild(siteLabel); box.appendChild(siteSelect); box.appendChild(siteNewInput);
+  box.appendChild(countryLabel); box.appendChild(countrySelect); box.appendChild(countryNewInput);
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 // ── Rename site ───────────────────────────────────────────────
@@ -1068,12 +1135,35 @@ function showConfigPanel() {
     dnameInput.value = c.display_name !== c.hostname ? c.display_name : '';
     dnameInput.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:150px;';
 
-    var snameInput = document.createElement('input');
-    snameInput.id = 'sname_' + c.id;
-    snameInput.type = 'text';
-    snameInput.placeholder = 'Site name (e.g. KCMH)';
-    snameInput.value = c.site_name || '';
-    snameInput.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:130px;';
+    // Site dropdown (existing sites + add new)
+    var snameSelect = document.createElement('select');
+    snameSelect.id = 'sname_' + c.id;
+    snameSelect.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:140px;';
+    var siteOptsHtml = '<option value="">Select site</option>' +
+      (window._sites || []).map(s => '<option value="' + s.id + '"' + (c.site_name === s.site_name ? ' selected' : '') + '>' + s.site_name + '</option>').join('') +
+      '<option value="__new__">+ Add new site...</option>';
+    snameSelect.innerHTML = siteOptsHtml;
+
+    var snameNew = document.createElement('input');
+    snameNew.id = 'sname_new_' + c.id;
+    snameNew.type = 'text';
+    snameNew.placeholder = 'New site name';
+    snameNew.style.cssText = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:130px;display:none;';
+    snameSelect.addEventListener('change', function() {
+      snameNew.style.display = this.value === '__new__' ? 'inline-block' : 'none';
+      // Auto-select country when existing site chosen
+      var selectedSite = (window._sites || []).find(s => s.id == this.value);
+      if (selectedSite && selectedSite.country_id) {
+        var csel = document.getElementById('cname_' + c.id);
+        if (csel) { (window._countries || []).forEach((co, i) => { if (co.name === selectedSite.country_id) {} }); }
+        // Find and select matching country
+        var cnSel = document.getElementById('cname_' + c.id);
+        if (cnSel) {
+          var matchCountry = (window._countries || []).find(co => co.id == selectedSite.country_id);
+          if (matchCountry) cnSel.value = matchCountry.country_name;
+        }
+      }
+    });
 
     // Country dropdown
     var cnameSelect = document.createElement('select');
@@ -1111,7 +1201,8 @@ function showConfigPanel() {
 
     row.appendChild(hostnameSpan);
     row.appendChild(dnameInput);
-    row.appendChild(snameInput);
+    row.appendChild(snameSelect);
+    row.appendChild(snameNew);
     row.appendChild(typeSelect);
     row.appendChild(cnameSelect);
     row.appendChild(cnameNew);
@@ -1122,7 +1213,20 @@ function showConfigPanel() {
 
 async function saveInstrumentConfig(configId, hostname) {
   const displayName  = document.getElementById('dname_' + configId).value.trim();
-  const siteName     = document.getElementById('sname_' + configId).value.trim();
+  const snameEl = document.getElementById('sname_' + configId);
+  const snameNewEl = document.getElementById('sname_new_' + configId);
+  // Site: if dropdown shows __new__ use text input, if it's a site ID resolve to name, else use value
+  let siteName = '';
+  if (snameEl && snameEl.tagName === 'SELECT') {
+    if (snameEl.value === '__new__') {
+      siteName = snameNewEl ? snameNewEl.value.trim() : '';
+    } else if (snameEl.value) {
+      const existingSite = (window._sites || []).find(s => s.id == snameEl.value);
+      siteName = existingSite ? existingSite.site_name : snameEl.options[snameEl.selectedIndex].textContent;
+    }
+  } else if (snameEl) {
+    siteName = snameEl.value.trim();
+  }
   const instrType    = document.getElementById('itype_' + configId) ? document.getElementById('itype_' + configId).value : 'standard';
   const countrySelect = document.getElementById('cname_' + configId);
   const countryNewInput = document.getElementById('cname_new_' + configId);
