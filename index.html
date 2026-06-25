@@ -530,11 +530,11 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
 
   let rows = '';
   regularTests.forEach(name => {
-    // Only treat Asa-Total as Neobase 2 panel representative if it is
-    // the only analyte (MSMS instrument). If other tests exist alongside
-    // Asa-Total (GSP instrument), treat it as a normal row.
+    // Treat Asa-Total (or C0) as the Neobase 2 collapsible summary row when
+    // MSMS analytes are present in the data (i.e. this is an MSMS instrument view).
+    // If no MSMS analytes exist alongside it (pure GSP view), show as a plain row.
     const isNeobase2Representative = isTotalsTab &&
-      (name === 'C0' || (name === 'Asa-Total' && tests.length === 1));
+      (name === 'C0' || (name === 'Asa-Total' && msmsTests.length > 0));
     if (isNeobase2Representative) {
       rows += renderC0SummaryRow(name);
     } else {
