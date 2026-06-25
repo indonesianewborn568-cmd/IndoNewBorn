@@ -80,7 +80,7 @@
   .push-modal-warn{background:#fff7ed;border:0.5px solid #fed7aa;border-radius:var(--radius);padding:12px 14px;font-size:13px;color:#7c2d12;margin:14px 0;line-height:1.6;}
   .push-modal-warn strong{display:block;margin-bottom:4px;font-size:13px;}
   .push-instr-list{max-height:200px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:6px 8px;margin-bottom:14px;font-size:12px;background:var(--metric);}
-  .push-instr-row{display:grid;grid-template-columns:1fr 90px 80px 90px;gap:6px;align-items:center;padding:5px 2px;border-bottom:0.5px solid var(--border);}
+  .push-instr-row{display:grid;grid-template-columns:1fr 90px 80px 90px;gap:6px;align-items:center;padding:5px 2px 0 2px;border-bottom:0.5px solid var(--border);}
   .push-instr-row:last-child{border-bottom:none;}
   .push-status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;display:inline-block;margin-right:5px;}
   .push-status-dot.pending{background:#e08c1a;animation:pulse 1.2s ease-in-out infinite;}
@@ -463,16 +463,11 @@ async function loadData() {
     // Detect if any MSMS instrument is in the current view by checking
     // instrument_type from instrument_config against the instrument IDs in this data
     const activeInstrIdsForMsms = new Set((rows || []).map(r => r.instrument_id));
-    console.log('[NBS debug] activeInstrIds:', [...activeInstrIdsForMsms]);
-    console.log('[NBS debug] _instruments:', (window._instruments||[]).map(i=>({id:i.id,hostname:i.hostname,display_name:i.display_name})));
-    console.log('[NBS debug] _instrConfigs:', (window._instrConfigs||[]).map(c=>({hostname:c.hostname,instrument_type:c.instrument_type})));
     const hasMsms = (window._instruments || []).some(instr => {
       if (!activeInstrIdsForMsms.has(instr.id)) return false;
       const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
-      console.log('[NBS debug] checking instr', instr.id, instr.hostname, '-> cfg:', cfg);
       return cfg && cfg.instrument_type === 'msms';
     });
-    console.log('[NBS debug] hasMsms:', hasMsms);
 
     const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year, true,  hasMsms);
     const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year, false, hasMsms);
@@ -998,32 +993,38 @@ async function openPushModal() {
   const listEl = document.getElementById('push-instr-list');
   listEl.innerHTML = '<span style="color:var(--muted)">Loading last push times…</span>';
 
-  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
-  if (activeInstrs.length === 0) {
-    listEl.innerHTML = '<span style="color:var(--muted)">No active instruments found.</span>';
+  // Only show active, non-legacy instruments (skip delinked and CSV-imported)
+  const allInstrs = (window._instruments || []).filter(i => i.active !== false);
+  const pushableInstrs = allInstrs.filter(i =>
+    i.hostname && i.hostname !== i.display_name && /^[A-Za-z0-9\-]+$/.test(i.hostname)
+  );
+
+  if (pushableInstrs.length === 0) {
+    listEl.innerHTML = '<span style="color:var(--muted)">No pushable instruments found (all are legacy CSV-imported or delinked).</span>';
     return;
   }
 
   // Fetch instrument_config to get last_pushed_at for each hostname
   let configMap = {};
   try {
-    const cfgResp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?select=hostname,last_pushed_at', {
+    const cfgResp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?select=hostname,last_pushed_at,webhook_url', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
     });
     const cfgs = await cfgResp.json();
     (cfgs || []).forEach(c => { configMap[c.hostname] = c; });
   } catch(e) { /* non-fatal — show dashes */ }
 
-  listEl.innerHTML = activeInstrs.map(i => {
-    const isLegacy = !i.hostname ||
-      i.hostname === i.display_name ||
-      !/^[A-Za-z0-9\-]+$/.test(i.hostname);
+  listEl.innerHTML = pushableInstrs.map(i => {
+    const site = (window._sites || []).find(s => s.id == i.site_id);
+    const siteLabel = site ? site.site_name : '';
+    // Show site name alongside display name to disambiguate duplicate names (e.g. 3x GSP 1)
+    const nameLabel = siteLabel
+      ? '<span style="font-weight:500">' + i.display_name + '</span> <span style="color:var(--muted);font-size:11px">(' + siteLabel + ')</span>'
+      : '<span style="font-weight:500">' + i.display_name + '</span>';
 
     const cfg = configMap[i.hostname];
     let lastLabel, lastColor;
-    if (isLegacy) {
-      lastLabel = 'legacy'; lastColor = 'var(--muted)';
-    } else if (cfg && cfg.last_pushed_at) {
+    if (cfg && cfg.last_pushed_at) {
       const d = new Date(cfg.last_pushed_at);
       lastLabel = d.toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'2-digit' });
       lastColor = 'var(--text)';
@@ -1031,23 +1032,50 @@ async function openPushModal() {
       lastLabel = 'never'; lastColor = '#c0392b';
     }
 
-    const resetCell = isLegacy
-      ? '<span style="color:var(--muted);font-size:11px;text-align:center;display:block">—</span>'
-      : '<input type="checkbox" class="push-reset-chk" id="reset-chk-' + i.id + '" title="Clear last-push date so this instrument does a full historical re-push">';
+    const storedUrl = (cfg && cfg.webhook_url) ? cfg.webhook_url : '';
 
     return '<div class="push-instr-row" id="push-row-' + i.id + '">' +
-      '<span><span class="push-status-dot" id="push-dot-' + i.id + '"></span>' +
-        '<span style="font-weight:500">' + i.display_name + '</span></span>' +
+      '<span><span class="push-status-dot" id="push-dot-' + i.id + '"></span>' + nameLabel + '</span>' +
       '<span id="push-last-' + i.id + '" style="color:' + lastColor + ';font-size:11px">' + lastLabel + '</span>' +
-      '<span style="text-align:center">' + resetCell + '</span>' +
-      '<span id="push-lbl-' + i.id + '" style="color:var(--muted);font-size:11px;text-align:right">' +
-        (isLegacy ? 'skip' : '—') + '</span>' +
+      '<span style="text-align:center"><input type="checkbox" class="push-reset-chk" id="reset-chk-' + i.id + '" title="Clear last-push date so this instrument does a full historical re-push"></span>' +
+      '<span id="push-lbl-' + i.id + '" style="color:var(--muted);font-size:11px;text-align:right">—</span>' +
+      '<div style="grid-column:1/-1;padding:2px 0 4px 18px;display:flex;gap:6px;align-items:center">' +
+        '<input type="text" id="webhook-url-' + i.id + '" value="' + storedUrl + '" placeholder="http://<IP or hostname>:5001/push" ' +
+          'style="flex:1;font-size:11px;font-family:monospace;padding:3px 7px;border-radius:4px;border:0.5px solid var(--border-strong);background:var(--bg);color:var(--text);" ' +
+          'title="Webhook URL for this instrument. Enter the public IP or hostname if reachable remotely.">' +
+        '<button class="btn" style="font-size:11px;padding:2px 8px;white-space:nowrap" ' +
+          'data-iid="' + i.id + '" data-hn="' + i.hostname + '" ' +
+          'onclick="saveWebhookUrl(this.dataset.iid,this.dataset.hn)" title="Save webhook URL">Save URL</button>' +
+      '</div>' +
     '</div>';
   }).join('');
 }
 
 function closePushModal() {
   document.getElementById('push-modal').style.display = 'none';
+}
+
+async function saveWebhookUrl(instrId, hostname) {
+  const input = document.getElementById('webhook-url-' + instrId);
+  if (!input) return;
+  const url = input.value.trim();
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?hostname=eq.' + encodeURIComponent(hostname), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ webhook_url: url || null })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    input.style.borderColor = '#3c9e5f';
+    setTimeout(() => { input.style.borderColor = ''; }, 2000);
+  } catch(e) {
+    alert('Failed to save webhook URL: ' + e.message);
+  }
 }
 
 async function executePush() {
@@ -1060,19 +1088,16 @@ async function executePush() {
   cancelBtn.textContent  = 'Close';
   resultEl.style.display = 'none';
 
-  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
+  const pushableInstrs = (window._instruments || []).filter(i =>
+    i.active !== false &&
+    i.hostname && i.hostname !== i.display_name && /^[A-Za-z0-9\-]+$/.test(i.hostname)
+  );
   let sent = 0, skipped = 0, failed = 0;
 
-  for (const instr of activeInstrs) {
+  for (const instr of pushableInstrs) {
     const dotEl = document.getElementById('push-dot-' + instr.id);
     const lblEl = document.getElementById('push-lbl-' + instr.id);
     const lastEl = document.getElementById('push-last-' + instr.id);
-
-    // Skip legacy CSV-imported instruments (hostname === display_name)
-    const isLegacy = !instr.hostname ||
-      instr.hostname === instr.display_name ||
-      !/^[A-Za-z0-9\-]+$/.test(instr.hostname);
-    if (isLegacy) { skipped++; continue; }
 
     if (dotEl) dotEl.className = 'push-status-dot pending';
     if (lblEl) lblEl.style.color = 'var(--muted)', lblEl.textContent = 'Sending…';
@@ -1098,8 +1123,9 @@ async function executePush() {
       }
     }
 
-    // Signal the instrument PC via its webhook listener (port 5001)
-    const webhookUrl = 'http://' + instr.hostname + ':5001/push';
+    // Use the webhook URL from the input field in the modal (may be IP-based for remote access)
+    const urlInput = document.getElementById('webhook-url-' + instr.id);
+    const webhookUrl = (urlInput && urlInput.value.trim()) ? urlInput.value.trim() : 'http://' + instr.hostname + ':5001/push';
     try {
       await fetch(webhookUrl, { method: 'GET', mode: 'no-cors', signal: AbortSignal.timeout(8000) });
       if (dotEl) dotEl.className = 'push-status-dot ok';
