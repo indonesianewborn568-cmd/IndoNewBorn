@@ -185,6 +185,7 @@
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="manage-users-btn" onclick="toggleUserPanel()" style="display:none" title="Manage user access">&#128100; Users</button>
     <button class="btn" id="push-btn" onclick="triggerPush()" style="display:none" title="Admin only — trigger push from instrument PC">&#8593; Push from instrument</button>
+    <button class="btn" id="reset-push-btn" onclick="triggerResetPush()" style="display:none" title="Admin only — clear last push date for one instrument then trigger full re-push">&#8635; Reset &amp; Full Push</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
   </div>
@@ -964,6 +965,69 @@ async function triggerPush() {
   }
 }
 
+// ── Reset & Full Push ────────────────────────────────────────
+async function triggerResetPush() {
+  // Ask which instrument to reset
+  const activeInstrs = (window._instruments || []).filter(i =>
+    i.active !== false &&
+    i.hostname && i.hostname !== i.display_name && /^[A-Za-z0-9\-]+$/.test(i.hostname)
+  );
+  if (activeInstrs.length === 0) { alert('No pushable instruments found.'); return; }
+
+  // Build selection list
+  const lines = activeInstrs.map((i, idx) => {
+    const site = (window._sites || []).find(s => s.id == i.site_id);
+    return (idx + 1) + '. ' + i.display_name + (site ? ' (' + site.site_name + ')' : '');
+  }).join('\n');
+  const choice = prompt('Select instrument to reset and do a FULL re-push:\n\n' + lines + '\n\nEnter number (1-' + activeInstrs.length + '):');
+  if (!choice) return;
+  const idx = parseInt(choice) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= activeInstrs.length) { alert('Invalid selection.'); return; }
+  const instr = activeInstrs[idx];
+  const site = (window._sites || []).find(s => s.id == instr.site_id);
+  const label = instr.display_name + (site ? ' (' + site.site_name + ')' : '');
+
+  if (!confirm('Reset last-push date for "' + label + '" and trigger a FULL historical re-push?\n\nThis will re-push ALL historical data from the local DB. May take several minutes.')) return;
+
+  // Clear last_pushed_at in Supabase
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?hostname=eq.' + encodeURIComponent(instr.hostname), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ last_pushed_at: null })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+  } catch(e) {
+    alert('Failed to reset last push date: ' + e.message); return;
+  }
+
+  // Fire webhook — same pattern as triggerPush
+  const webhookUrl = localStorage.getItem('webhookUrl') ||
+    prompt('Enter instrument PC webhook URL (e.g. http://DESKTOP-75E57AU:5001/push). Saved for future use.');
+  if (!webhookUrl) return;
+  localStorage.setItem('webhookUrl', webhookUrl);
+
+  const btn = document.getElementById('reset-push-btn');
+  btn.textContent = 'Full push sent...';
+  btn.disabled = true;
+  try {
+    await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
+    btn.textContent = 'Full push sent! Refreshing in 60s...';
+    setTimeout(async () => {
+      await init();
+      btn.textContent = '↺ Reset & Full Push';
+      btn.disabled = false;
+    }, 60000);
+  } catch(e) {
+    btn.textContent = '↺ Reset & Full Push';
+    btn.disabled = false;
+    alert('Could not reach instrument at: ' + webhookUrl);
+  }
+}
+
 // ── CSV Upload ────────────────────────────────────────────────
 
 // ── Pending instrument config banner ─────────────────────────
@@ -1162,7 +1226,7 @@ function applyUserRestrictions() {
 
   // Hide ALL edit controls for non-admins
   if (!isAdmin) {
-    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','push-btn','manage-users-btn'].forEach(id => {
+    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','push-btn','reset-push-btn','manage-users-btn'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -1174,6 +1238,7 @@ function applyUserRestrictions() {
   if (isAdmin) {
     document.getElementById('manage-users-btn').style.display = 'inline-flex';
     document.getElementById('push-btn').style.display = 'inline-flex';
+    document.getElementById('reset-push-btn').style.display = 'inline-flex';
   }
 }
 
