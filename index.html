@@ -80,7 +80,7 @@
   .push-modal-warn{background:#fff7ed;border:0.5px solid #fed7aa;border-radius:var(--radius);padding:12px 14px;font-size:13px;color:#7c2d12;margin:14px 0;line-height:1.6;}
   .push-modal-warn strong{display:block;margin-bottom:4px;font-size:13px;}
   .push-instr-list{max-height:200px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:6px 8px;margin-bottom:14px;font-size:12px;background:var(--metric);}
-  .push-instr-row{display:grid;grid-template-columns:1fr 90px 80px 90px;gap:6px;align-items:center;padding:5px 2px;border-bottom:0.5px solid var(--border);}
+  .push-instr-row{display:grid;grid-template-columns:1fr 90px 80px 90px;gap:6px;align-items:center;padding:5px 2px 0 2px;border-bottom:0.5px solid var(--border);}
   .push-instr-row:last-child{border-bottom:none;}
   .push-status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;display:inline-block;margin-right:5px;}
   .push-status-dot.pending{background:#e08c1a;animation:pulse 1.2s ease-in-out infinite;}
@@ -1032,11 +1032,20 @@ async function openPushModal() {
       lastLabel = 'never'; lastColor = '#c0392b';
     }
 
+    // Load saved webhook URL from localStorage (keyed by hostname)
+    const savedUrl = localStorage.getItem('webhook_' + i.hostname) || '';
+
     return '<div class="push-instr-row" id="push-row-' + i.id + '">' +
       '<span><span class="push-status-dot" id="push-dot-' + i.id + '"></span>' + nameLabel + '</span>' +
       '<span id="push-last-' + i.id + '" style="color:' + lastColor + ';font-size:11px">' + lastLabel + '</span>' +
       '<span style="text-align:center"><input type="checkbox" class="push-reset-chk" id="reset-chk-' + i.id + '" title="Clear last-push date so this instrument does a full historical re-push"></span>' +
       '<span id="push-lbl-' + i.id + '" style="color:var(--muted);font-size:11px;text-align:right">—</span>' +
+      '<div style="grid-column:1/-1;padding:0 0 5px 18px;display:flex;gap:6px;align-items:center">' +
+        '<input type="text" id="wh-url-' + i.id + '" data-hostname="' + i.hostname + '" value="' + savedUrl + '" ' +
+          'placeholder="http://' + i.hostname + ':5001/push  (or use IP address if remote)" ' +
+          'style="flex:1;font-size:11px;font-family:monospace;padding:3px 7px;border-radius:4px;border:0.5px solid var(--border-strong);background:var(--bg);color:var(--text);" ' +
+          'onchange="localStorage.setItem('webhook_'+this.dataset.hostname, this.value.trim())">' +
+      '</div>' +
     '</div>';
   }).join('');
 }
@@ -1090,9 +1099,12 @@ async function executePush() {
       }
     }
 
-    // Derive webhook URL from hostname — same behaviour as original dashboard
-    // Works on LAN (hostname resolves automatically), or if hostname is an IP address
-    const webhookUrl = 'http://' + instr.hostname + ':5001/push';
+    // Use saved URL from input (localStorage), or fall back to hostname for LAN use
+    const urlInput = document.getElementById('wh-url-' + instr.id);
+    const enteredUrl = urlInput ? urlInput.value.trim() : '';
+    const webhookUrl = enteredUrl || ('http://' + instr.hostname + ':5001/push');
+    // Save to localStorage for next time
+    if (enteredUrl) localStorage.setItem('webhook_' + instr.hostname, enteredUrl);
     try {
       await fetch(webhookUrl, { method: 'GET', mode: 'no-cors', signal: AbortSignal.timeout(8000) });
       if (dotEl) dotEl.className = 'push-status-dot ok';
