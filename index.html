@@ -70,6 +70,23 @@
   .role-admin{background:#e8f5e9;color:#2e7d32;}
   .role-country{background:#e3f2fd;color:#1565c0;}
   .role-site{background:#fff3e0;color:#e65100;}
+  /* Full push button — amber, admin only */
+  .btn-push-admin{background:#b45309;color:#fff;border-color:#92400e;font-weight:500;}
+  .btn-push-admin:hover{opacity:.88;background:#92400e;}
+  /* Push modal */
+  .push-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9990;display:flex;align-items:center;justify-content:center;}
+  .push-modal{background:var(--surface);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);padding:2rem;width:480px;max-width:95vw;box-shadow:0 12px 40px rgba(0,0,0,0.25);}
+  .push-modal h3{font-size:16px;font-weight:600;margin-bottom:6px;}
+  .push-modal-warn{background:#fff7ed;border:0.5px solid #fed7aa;border-radius:var(--radius);padding:12px 14px;font-size:13px;color:#7c2d12;margin:14px 0;line-height:1.55;}
+  .push-modal-warn strong{display:block;margin-bottom:4px;font-size:13px;}
+  .push-instr-list{max-height:160px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 10px;margin-bottom:14px;font-size:12px;background:var(--metric);}
+  .push-instr-row{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--border);}
+  .push-instr-row:last-child{border-bottom:none;}
+  .push-status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;}
+  .push-status-dot.pending{background:#e08c1a;animation:pulse 1.2s ease-in-out infinite;}
+  .push-status-dot.ok{background:#3c9e5f;}
+  .push-status-dot.err{background:#c0392b;}
+  .push-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px;}
   /* User management panel */
   .user-panel{background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;}
   .user-row{display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;font-size:13px;}
@@ -183,7 +200,7 @@
     <button class="btn" id="show-delinked-btn" onclick="toggleShowDelinked()" style="font-size:11px;color:var(--muted)" title="Show delinked instruments for management">&#128274; Delinked</button>
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="manage-users-btn" onclick="toggleUserPanel()" style="display:none" title="Manage user access">&#128100; Users</button>
-    <button class="btn" id="push-btn" onclick="triggerPush()">&#8593; Push from instrument</button>
+    <button class="btn btn-push-admin" id="push-btn" onclick="openPushModal()" style="display:none" title="Admin only — trigger push from all instrument PCs">&#8593; Full Push</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
   </div>
@@ -208,7 +225,31 @@
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- Full Push Modal (admin only) -->
+<div id="push-modal" class="push-modal-overlay" style="display:none">
+  <div class="push-modal">
+    <h3>⚠ Full Push — All Instruments</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:0">Trigger a data push from every active instrument PC via its webhook listener.</p>
+    <div class="push-modal-warn">
+      <strong>Before you proceed, read this:</strong>
+      Each instrument PC must be <strong>online</strong> and running <strong>Webhook-Listener.ps1</strong> for the push to reach it.
+      Pushes are <strong>incremental</strong> — only data since the last push date is sent. A full historical re-push is not triggered here.
+      The dashboard will auto-refresh 45 seconds after sending all signals.
+      Instruments without a configured webhook URL will be skipped.
+    </div>
+    <div style="font-size:12px;font-weight:500;margin-bottom:6px;color:var(--muted)">ACTIVE INSTRUMENTS</div>
+    <div class="push-instr-list" id="push-instr-list">
+      <span style="color:var(--muted)">Loading…</span>
+    </div>
+    <div id="push-modal-result" style="font-size:12px;color:var(--muted);min-height:18px;margin-bottom:10px;display:none"></div>
+    <div class="push-modal-actions">
+      <button class="btn" id="push-cancel-btn" onclick="closePushModal()">Cancel</button>
+      <button class="btn btn-push-admin" id="push-confirm-btn" onclick="executePush()">Send Push Signal</button>
+    </div>
+  </div>
+</div>
+
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const SUPABASE_URL = "https://ngplytucjattrffxbxig.supabase.co";
@@ -359,7 +400,7 @@ async function init() {
     }
 
     // Check for unassigned instruments (in instrument_config but not yet configured)
-    const configs = await sbFrom('instrument_config', { select: 'id,hostname,display_name,site_name,instrument_type', order: 'hostname.asc' });
+    const configs = await sbFrom('instrument_config', { select: 'id,hostname,display_name,site_name', order: 'hostname.asc' });
     window._instrConfigs = configs || [];
     const unassigned = configs.filter(c => !c.site_name);
     if (unassigned.length > 0) {
@@ -407,31 +448,16 @@ async function loadData() {
 
     const totalMap = {}, elevMap = {};
     const testNames = new Set();
-    const instrumentIdsInData = new Set();
     (rows || []).forEach(r => {
       testNames.add(r.test_name);
-      if (r.instrument_id) instrumentIdsInData.add(r.instrument_id);
       const k = r.test_name + '|' + r.month;
       totalMap[k] = (totalMap[k] || 0) + r.total_count;
       elevMap[k]  = (elevMap[k]  || 0) + r.elevated_count;
     });
 
-    // Detect if any MSMS instrument contributed to this view
-    // by cross-referencing with instrument_config types
-    const msmsInstrIds = new Set(
-      (window._instrConfigs || [])
-        .filter(c => c.instrument_type === 'msms')
-        .map(c => {
-          const i = (window._instruments || []).find(x => x.display_name === c.display_name || x.hostname === c.hostname);
-          return i ? i.id : null;
-        })
-        .filter(Boolean)
-    );
-    const hasMsmsInstrument = [...instrumentIdsInData].some(id => msmsInstrIds.has(id));
-
     const tests = [...testNames].sort();
-    const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year, true,  hasMsmsInstrument);
-    const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year, false, hasMsmsInstrument);
+    const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year, true);
+    const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year, false);
 
     document.getElementById('m-total').textContent    = totStats.grandTotal.toLocaleString();
     document.getElementById('m-elevated').textContent = Object.values(elevMap).reduce((a,b)=>a+b,0).toLocaleString();
@@ -453,7 +479,7 @@ async function loadData() {
 }
 
 // ── Build table ───────────────────────────────────────────────
-function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsmsInstrument) {
+function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab) {
   const thead = document.getElementById(theadId);
   const tbody = document.getElementById(tbodyId);
   const colTotals = Array(12).fill(0);
@@ -502,12 +528,11 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
 
   let rows = '';
   regularTests.forEach(name => {
-    // Only treat Asa-Total as Neobase 2 panel representative when an MSMS
-    // instrument contributed to this view (detected via instrument_type in
-    // instrument_config). Falls back to msmsTests.length for cases where
-    // C0 and other MSMS analytes are present but hasMsmsInstrument is unknown.
+    // Only treat Asa-Total as Neobase 2 panel representative if it is
+    // the only analyte (MSMS instrument). If other tests exist alongside
+    // Asa-Total (GSP instrument), treat it as a normal row.
     const isNeobase2Representative = isTotalsTab &&
-      (name === 'C0' || (name === 'Asa-Total' && (hasMsmsInstrument || msmsTests.length > 0)));
+      (name === 'C0' || (name === 'Asa-Total' && tests.length === 1));
     if (isNeobase2Representative) {
       rows += renderC0SummaryRow(name);
     } else {
@@ -519,7 +544,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     if (name !== 'C0') rows += renderRow(name, true);
   });
 
-  rows += '<tr class="total-row"><td>Total' + (isTotalsTab && hasMsmsInstrument ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS panel counted via Neobase 2)</span>' : '') + '</td>';
+  rows += '<tr class="total-row"><td>Total' + (isTotalsTab ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS counted via C0)</span>' : '') + '</td>';
   colTotals.forEach((v,i) => rows += '<td' + (i===curMonth?' style="color:var(--blue)"':'') + '>' + v.toLocaleString() + '</td>');
   rows += '<td>' + grandTotal.toLocaleString() + '</td></tr>';
   tbody.innerHTML = rows;
@@ -944,29 +969,96 @@ function exportCSV() {
   a.click();
 }
 
-// ── Push from instrument (webhook) ────────────────────────────
-async function triggerPush() {
-  const webhookUrl = localStorage.getItem('webhookUrl') ||
-    prompt('Enter instrument PC webhook URL (e.g. http://DESKTOP-75E57AU:5001/push). Saved for future use.');
-  if (!webhookUrl) return;
-  localStorage.setItem('webhookUrl', webhookUrl);
-  const btn = document.getElementById('push-btn');
-  btn.textContent = 'Pushing...';
-  btn.disabled = true;
-  try {
-    await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
-    btn.textContent = 'Push sent! Refreshing in 30s...';
+// ── Full Push modal (admin only) ──────────────────────────────
+function openPushModal() {
+  // Populate instrument list from window._instruments
+  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
+  const listEl = document.getElementById('push-instr-list');
+  if (activeInstrs.length === 0) {
+    listEl.innerHTML = '<span style="color:var(--muted)">No active instruments found.</span>';
+  } else {
+    listEl.innerHTML = activeInstrs.map(i => {
+      const site = (window._sites || []).find(s => s.id == i.site_id);
+      const siteLabel = site ? site.site_name : '(no site)';
+      return '<div class="push-instr-row" id="push-row-' + i.id + '">' +
+        '<span class="push-status-dot" id="push-dot-' + i.id + '"></span>' +
+        '<span style="flex:1;font-weight:500">' + i.display_name + '</span>' +
+        '<span style="color:var(--muted)">' + siteLabel + '</span>' +
+        '<span id="push-lbl-' + i.id + '" style="color:var(--muted);font-size:11px;min-width:70px;text-align:right">—</span>' +
+      '</div>';
+    }).join('');
+  }
+  document.getElementById('push-modal-result').style.display = 'none';
+  document.getElementById('push-confirm-btn').disabled = false;
+  document.getElementById('push-confirm-btn').textContent = 'Send Push Signal';
+  document.getElementById('push-cancel-btn').textContent = 'Cancel';
+  document.getElementById('push-modal').style.display = 'flex';
+}
+
+function closePushModal() {
+  document.getElementById('push-modal').style.display = 'none';
+}
+
+async function executePush() {
+  const confirmBtn = document.getElementById('push-confirm-btn');
+  const cancelBtn  = document.getElementById('push-cancel-btn');
+  const resultEl   = document.getElementById('push-modal-result');
+
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Sending…';
+  cancelBtn.textContent  = 'Close';
+  resultEl.style.display = 'none';
+
+  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
+  let sent = 0, skipped = 0, failed = 0;
+
+  for (const instr of activeInstrs) {
+    const dotEl = document.getElementById('push-dot-' + instr.id);
+    const lblEl = document.getElementById('push-lbl-' + instr.id);
+    if (dotEl) dotEl.className = 'push-status-dot pending';
+    if (lblEl) lblEl.textContent = 'Sending…';
+
+    // Look up webhook URL from instrument_config by hostname
+    const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
+    const webhookUrl = cfg && cfg.webhook_url ? cfg.webhook_url : null;
+
+    if (!webhookUrl) {
+      if (dotEl) dotEl.className = 'push-status-dot';
+      if (lblEl) lblEl.style.color = 'var(--muted)', lblEl.textContent = 'No webhook';
+      skipped++;
+      continue;
+    }
+
+    try {
+      // fire-and-forget — no-cors so we can't read the response
+      await fetch(webhookUrl, { method: 'GET', mode: 'no-cors', signal: AbortSignal.timeout(8000) });
+      if (dotEl) dotEl.className = 'push-status-dot ok';
+      if (lblEl) lblEl.style.color = '#3c9e5f', lblEl.textContent = 'Signal sent';
+      sent++;
+    } catch(e) {
+      if (dotEl) dotEl.className = 'push-status-dot err';
+      if (lblEl) lblEl.style.color = '#c0392b', lblEl.textContent = 'Unreachable';
+      failed++;
+    }
+  }
+
+  // Summary
+  resultEl.style.display = 'block';
+  resultEl.style.color = failed > 0 ? '#c0392b' : '#3c9e5f';
+  resultEl.textContent = 'Done — ' + sent + ' signal(s) sent, ' +
+    skipped + ' skipped (no webhook), ' + failed + ' unreachable. ' +
+    (sent > 0 ? 'Dashboard will refresh in 45 s.' : '');
+
+  confirmBtn.textContent = 'Done';
+
+  if (sent > 0) {
     setTimeout(async () => {
+      closePushModal();
       await init();
-      btn.textContent = '↑ Push from instrument';
-      btn.disabled = false;
-    }, 30000);
-  } catch(e) {
-    btn.textContent = '↑ Push from instrument';
-    btn.disabled = false;
-    alert('Could not reach instrument at: ' + webhookUrl);
+    }, 45000);
   }
 }
+
 
 // ── CSV Upload ────────────────────────────────────────────────
 
@@ -1174,9 +1266,10 @@ function applyUserRestrictions() {
     window._nonAdminMode = true;
   }
 
-  // Show user management for admins only
+  // Show user management and push button for admins only
   if (isAdmin) {
     document.getElementById('manage-users-btn').style.display = 'inline-flex';
+    document.getElementById('push-btn').style.display = 'inline-flex';
   }
 }
 
@@ -1326,8 +1419,7 @@ async function createManagerForCountry(countryId, countryName) {
 }
 
 async function loadUserList() {
-  // hidden=eq.false excludes the recovery admin from the UI entirely
-  const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?select=id,name,role,token,country_id,site_id,active&hidden=eq.false&order=id.asc', {
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/dashboard_users?select=id,name,role,token,country_id,site_id,active&order=id.asc', {
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
   });
   const users = await resp.json();
@@ -1335,7 +1427,6 @@ async function loadUserList() {
   const roleLabels = { admin: 'Admin', country_manager: 'Country Manager', site_manager: 'Site Manager' };
   const roleClasses = { admin: 'role-admin', country_manager: 'role-country', site_manager: 'role-site' };
   const adminCount = users.filter(x => x.role === 'admin' && x.active).length;
-  const myToken = localStorage.getItem('nbs_token');
 
   list.innerHTML = '';
   users.forEach(u => {
@@ -1363,38 +1454,33 @@ async function loadUserList() {
     tokenSpan.style.cssText = 'font-size:11px;font-family:monospace;background:var(--metric);padding:2px 8px;border-radius:4px;color:var(--muted)';
     tokenSpan.textContent = u.token;
 
-    // Disable/Enable button — hidden for currently logged-in user (can't disable yourself)
-    if (u.token !== myToken) {
-      var toggleBtn = document.createElement('button');
-      toggleBtn.className = 'btn';
-      toggleBtn.style.cssText = 'font-size:11px;padding:3px 8px';
-      toggleBtn.textContent = u.active ? 'Disable' : 'Enable';
-      toggleBtn.dataset.userId = u.id;
-      toggleBtn.dataset.active = u.active;
-      toggleBtn.addEventListener('click', function() {
-        toggleUserActive(parseInt(this.dataset.userId), this.dataset.active === 'true');
-      });
-      row.appendChild(toggleBtn);
-    }
+    var toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn';
+    toggleBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+    toggleBtn.textContent = u.active ? 'Disable' : 'Enable';
+    toggleBtn.dataset.userId = u.id;
+    toggleBtn.dataset.active = u.active;
+    toggleBtn.addEventListener('click', function() {
+      toggleUserActive(parseInt(this.dataset.userId), this.dataset.active === 'true');
+    });
 
     row.appendChild(nameSpan);
     row.appendChild(roleBadge);
     row.appendChild(scopeSpan);
     row.appendChild(tokenSpan);
+    row.appendChild(toggleBtn);
 
-    // Regenerate URL button — hidden for the currently logged-in user (self-lockout prevention)
-    if (u.token !== myToken) {
-      var regenBtn = document.createElement('button');
-      regenBtn.className = 'btn';
-      regenBtn.style.cssText = 'font-size:11px;padding:3px 8px';
-      regenBtn.textContent = 'New URL';
-      regenBtn.dataset.userId = u.id;
-      regenBtn.dataset.userName = u.name;
-      regenBtn.addEventListener('click', function() {
-        regenerateToken(parseInt(this.dataset.userId), this.dataset.userName);
-      });
-      row.appendChild(regenBtn);
-    }
+    // Regenerate URL button
+    var regenBtn = document.createElement('button');
+    regenBtn.className = 'btn';
+    regenBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+    regenBtn.textContent = 'New URL';
+    regenBtn.dataset.userId = u.id;
+    regenBtn.dataset.userName = u.name;
+    regenBtn.addEventListener('click', function() {
+      regenerateToken(parseInt(this.dataset.userId), this.dataset.userName);
+    });
+    row.appendChild(regenBtn);
 
     // Show delete button for non-admin, or admin if there are multiple admins
     if (u.role !== 'admin' || adminCount > 1) {
