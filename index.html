@@ -463,11 +463,16 @@ async function loadData() {
     // Detect if any MSMS instrument is in the current view by checking
     // instrument_type from instrument_config against the instrument IDs in this data
     const activeInstrIdsForMsms = new Set((rows || []).map(r => r.instrument_id));
+    console.log('[NBS debug] activeInstrIds:', [...activeInstrIdsForMsms]);
+    console.log('[NBS debug] _instruments:', (window._instruments||[]).map(i=>({id:i.id,hostname:i.hostname,display_name:i.display_name})));
+    console.log('[NBS debug] _instrConfigs:', (window._instrConfigs||[]).map(c=>({hostname:c.hostname,instrument_type:c.instrument_type})));
     const hasMsms = (window._instruments || []).some(instr => {
       if (!activeInstrIdsForMsms.has(instr.id)) return false;
       const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
+      console.log('[NBS debug] checking instr', instr.id, instr.hostname, '-> cfg:', cfg);
       return cfg && cfg.instrument_type === 'msms';
     });
+    console.log('[NBS debug] hasMsms:', hasMsms);
 
     const totStats  = buildTable('thead-total',    'tbody-total',    tests, totalMap, year, true,  hasMsms);
     const elevStats = buildTable('thead-elevated', 'tbody-elevated', tests, elevMap,  year, false, hasMsms);
