@@ -1028,16 +1028,31 @@ function exportCSV() {
 
 // ── Push from instrument (webhook) ────────────────────────────
 async function triggerPush() {
-  const webhookUrl = localStorage.getItem('webhookUrl') ||
-    prompt('Enter instrument PC webhook URL (e.g. http://DESKTOP-75E57AU:5001/push). Saved for future use.');
-  if (!webhookUrl) return;
-  localStorage.setItem('webhookUrl', webhookUrl);
   const btn = document.getElementById('push-btn');
   btn.textContent = 'Pushing...';
   btn.disabled = true;
   try {
-    await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
-    btn.textContent = 'Push sent! Refreshing in 30s...';
+    // Fetch all active instrument webhook URLs from instrument_config
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?select=hostname,display_name,webhook_url&webhook_url=not.is.null', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    const configs = await resp.json();
+    const active = configs.filter(c => c.webhook_url);
+    if (active.length === 0) {
+      alert('No instrument webhook URLs registered yet. Run Push-Now.bat on each instrument PC first to self-register.');
+      btn.textContent = '↑ Push from instrument';
+      btn.disabled = false;
+      return;
+    }
+    // Fire all webhooks simultaneously
+    let fired = 0;
+    await Promise.allSettled(active.map(async c => {
+      try {
+        await fetch(c.webhook_url, { method: 'GET', mode: 'no-cors' });
+        fired++;
+      } catch(e) {}
+    }));
+    btn.textContent = 'Push sent to ' + active.length + ' PC(s)! Refreshing in 30s...';
     setTimeout(async () => {
       await init();
       btn.textContent = '↑ Push from instrument';
@@ -1046,61 +1061,78 @@ async function triggerPush() {
   } catch(e) {
     btn.textContent = '↑ Push from instrument';
     btn.disabled = false;
-    alert('Could not reach instrument at: ' + webhookUrl);
+    alert('Push failed: ' + e.message);
   }
 }
 
 // ── Reset & Full Push ────────────────────────────────────────
 async function triggerResetPush() {
-  // Ask which instrument to reset
-  const activeInstrs = (window._instruments || []).filter(i =>
-    i.active !== false &&
-    i.hostname && i.hostname !== i.display_name && /^[A-Za-z0-9\-]+$/.test(i.hostname)
-  );
-  if (activeInstrs.length === 0) { alert('No pushable instruments found.'); return; }
+  // Fetch all active instruments with their webhook URLs
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?select=hostname,display_name,webhook_url,last_pushed_at', {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+  });
+  const configs = await resp.json();
+
+  // Match configs to active instruments
+  const activeInstrs = (window._instruments || []).filter(i => i.active !== false);
+  const pushable = activeInstrs.map(i => {
+    const cfg = configs.find(c => c.hostname === i.hostname);
+    const site = (window._sites || []).find(s => s.id == i.site_id);
+    return { ...i, webhook_url: cfg ? cfg.webhook_url : null, site_name: site ? site.site_name : '' };
+  }).filter(i => i.hostname);
+
+  if (pushable.length === 0) { alert('No instruments found.'); return; }
 
   // Build selection list
-  const lines = activeInstrs.map((i, idx) => {
-    const site = (window._sites || []).find(s => s.id == i.site_id);
-    return (idx + 1) + '. ' + i.display_name + (site ? ' (' + site.site_name + ')' : '');
-  }).join('\n');
-  const choice = prompt('Select instrument to reset and do a FULL re-push:\n\n' + lines + '\n\nEnter number (1-' + activeInstrs.length + '):');
+  const lines = pushable.map((i, idx) =>
+    (idx + 1) + '. ' + i.display_name + (i.site_name ? ' (' + i.site_name + ')' : '') +
+    (i.webhook_url ? '' : ' ⚠ no webhook')
+  ).join('\n');
+
+  const choice = prompt('Select instrument for FULL re-push:\n\n' + lines + '\n\nEnter number, or 0 for ALL instruments:');
   if (!choice) return;
-  const idx = parseInt(choice) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= activeInstrs.length) { alert('Invalid selection.'); return; }
-  const instr = activeInstrs[idx];
-  const site = (window._sites || []).find(s => s.id == instr.site_id);
-  const label = instr.display_name + (site ? ' (' + site.site_name + ')' : '');
+  const choiceNum = parseInt(choice);
 
-  if (!confirm('Reset last-push date for "' + label + '" and trigger a FULL historical re-push?\n\nThis will re-push ALL historical data from the local DB. May take several minutes.')) return;
-
-  // Clear last_pushed_at in Supabase
-  try {
-    const resp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?hostname=eq.' + encodeURIComponent(instr.hostname), {
-      method: 'PATCH',
-      headers: {
-        'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
-        'Content-Type': 'application/json', 'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify({ last_pushed_at: null })
-    });
-    if (!resp.ok) throw new Error(await resp.text());
-  } catch(e) {
-    alert('Failed to reset last push date: ' + e.message); return;
+  let selected = [];
+  if (choiceNum === 0) {
+    selected = pushable;
+    if (!confirm('Reset ALL ' + pushable.length + ' instruments and trigger full re-push?\n\nThis may take several minutes.')) return;
+  } else {
+    const idx = choiceNum - 1;
+    if (isNaN(idx) || idx < 0 || idx >= pushable.length) { alert('Invalid selection.'); return; }
+    selected = [pushable[idx]];
+    const label = selected[0].display_name + (selected[0].site_name ? ' (' + selected[0].site_name + ')' : '');
+    if (!confirm('Reset last-push date for "' + label + '" and trigger a FULL historical re-push?\n\nThis will re-push ALL historical data. May take several minutes.')) return;
   }
 
-  // Fire webhook — same pattern as triggerPush
-  const webhookUrl = localStorage.getItem('webhookUrl') ||
-    prompt('Enter instrument PC webhook URL (e.g. http://DESKTOP-75E57AU:5001/push). Saved for future use.');
-  if (!webhookUrl) return;
-  localStorage.setItem('webhookUrl', webhookUrl);
+  const noWebhook = selected.filter(i => !i.webhook_url);
+  if (noWebhook.length > 0) {
+    alert('Warning: these instruments have no webhook URL registered (run Push-Now.bat on them first):\n' +
+      noWebhook.map(i => '• ' + i.display_name).join('\n'));
+  }
 
   const btn = document.getElementById('reset-push-btn');
-  btn.textContent = 'Full push sent...';
+  btn.textContent = 'Resetting...';
   btn.disabled = true;
+
   try {
-    await fetch(webhookUrl, { method: 'GET', mode: 'no-cors' });
-    btn.textContent = 'Full push sent! Refreshing in 60s...';
+    // Clear last_pushed_at for all selected instruments
+    await Promise.all(selected.map(i =>
+      fetch(SUPABASE_URL + '/rest/v1/instrument_config?hostname=eq.' + encodeURIComponent(i.hostname), {
+        method: 'PATCH',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ last_pushed_at: null })
+      })
+    ));
+
+    // Fire webhooks for instruments that have one
+    const withWebhook = selected.filter(i => i.webhook_url);
+    await Promise.allSettled(withWebhook.map(i =>
+      fetch(i.webhook_url, { method: 'GET', mode: 'no-cors' }).catch(() => {})
+    ));
+
+    btn.textContent = 'Full push sent to ' + withWebhook.length + ' PC(s)! Refreshing in 60s...';
     setTimeout(async () => {
       await init();
       btn.textContent = '↺ Reset & Full Push';
@@ -1109,7 +1141,7 @@ async function triggerResetPush() {
   } catch(e) {
     btn.textContent = '↺ Reset & Full Push';
     btn.disabled = false;
-    alert('Could not reach instrument at: ' + webhookUrl);
+    alert('Reset failed: ' + e.message);
   }
 }
 
