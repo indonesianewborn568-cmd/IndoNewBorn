@@ -556,7 +556,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     grandTotal += ytd;
     var onclick = 'toggleKitPanel(this,&quot;' + panelId + '&quot;)';
     let r = '<tr><td title="' + kitLabel + ', represented by ' + repName + '" style="cursor:pointer" onclick="' + onclick + '">' +
-    months.forEach((v,i) => {
+            '<span id="caret-' + panelId + '" style="display:inline-block;width:14px">&#9656;</span> ' + kitLabel + ' (' + repName + ')</td>';
       colTotals[i] += v;
       r += '<td' + (i===curMonth?' class="cur"':'') + '>' + (v||'—') + '</td>';
     });
