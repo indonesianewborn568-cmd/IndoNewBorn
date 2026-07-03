@@ -549,9 +549,6 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     r += '<td style="font-weight:' + fw + '">' + ytd.toLocaleString() + '</td></tr>';
     return r;
   }
-    r += '<td style="font-weight:' + (isMsmsMember ? '400;color:var(--muted);font-size:11px' : '500') + '">' + ytd.toLocaleString() + '</td></tr>';
-    return r;
-  }
 
   function renderKitSummaryRow(repName, kitLabel, panelId) {
     const months = MONTHS.map((_,i) => dataMap[repName+'|'+(i+1)] || 0);
