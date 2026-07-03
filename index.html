@@ -524,17 +524,26 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
   });
 
 
+
   function renderRow(name, panelClass) {
     const isMsmsMember = !!panelClass;
-    const months = MONTHS.map((_,i) => dataMap[name+'|'+(i+1)] || 0);
-    const ytd = months.reduce((a,b)=>a+b,0);
+    const months = MONTHS.map(function(_,i){ return dataMap[name+'|'+(i+1)] || 0; });
+    const ytd = months.reduce(function(a,b){ return a+b; }, 0);
     const includeInGrandTotal = !isMsmsMember;
     if (includeInGrandTotal) grandTotal += ytd;
-    let r = '<tr' + (isMsmsMember ? ' class="kit-row ' + panelClass + '" style="display:none"' : '') + '><td title="' + name + '"' + (isMsmsMember ? ' style="padding-left:32px;color:var(--muted);font-size:11px"' : '') + '>' + name + '</td>';
-    months.forEach((v,i) => {
+    var cls = isMsmsMember ? ' class="kit-row ' + panelClass + '" style="display:none"' : '';
+    var tdStyle = isMsmsMember ? ' style="padding-left:32px;color:var(--muted);font-size:11px"' : '';
+    var r = '<tr' + cls + '><td title="' + name + '"' + tdStyle + '>' + name + '</td>';
+    months.forEach(function(v,i) {
       if (includeInGrandTotal) colTotals[i] += v;
-      r += '<td' + (i===curMonth?' class="cur"':'') + (isMsmsMember ? ' style="color:var(--muted);font-size:11px"' : '') + '>' + (v||'\u2014') + '</td>';
+      var cur = i===curMonth ? ' class="cur"' : '';
+      var ms = isMsmsMember ? ' style="color:var(--muted);font-size:11px"' : '';
+      r += '<td' + cur + ms + '>' + (v||'—') + '</td>';
     });
+    var fw = isMsmsMember ? '400;color:var(--muted);font-size:11px' : '500';
+    r += '<td style="font-weight:' + fw + '">' + ytd.toLocaleString() + '</td></tr>';
+    return r;
+  }
     r += '<td style="font-weight:' + (isMsmsMember ? '400;color:var(--muted);font-size:11px' : '500') + '">' + ytd.toLocaleString() + '</td></tr>';
     return r;
   }
