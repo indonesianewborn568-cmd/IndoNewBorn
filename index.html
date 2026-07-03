@@ -296,7 +296,9 @@ async function sbRpc(fn, params = {}) {
     headers: {
       'apikey': SUPABASE_KEY,
       'Authorization': 'Bearer ' + SUPABASE_KEY,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Range': '0-9999',
+      'Prefer': 'count=none'
     },
     body: JSON.stringify(params)
   });
