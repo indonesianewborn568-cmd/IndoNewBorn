@@ -512,13 +512,18 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
   hdr += '<th style="color:var(--text)">Total YTD</th></tr>';
   thead.innerHTML = hdr;
 
-  // Classify tests: GSP tests are always regular rows.
-  // Non-GSP tests are MSMS members when hasMsms=true (grouped in collapsible panel).
-  // Asa-Total is always the Neobase 2 header — excluded from both lists here.
+  // MSMS kit representatives -- each becomes a collapsible header row
+  const MSMS_KITS = {
+    'Asa-Total': { label: 'Neobase 2' },
+    'GUAC':      { label: 'GUAC kit'  }
+  };
+
+  // Classify tests
   const regularTests = [];
   const msmsTests = [];
+  const kitReps = isTotalsTab && hasMsms ? Object.keys(MSMS_KITS).filter(k => tests.includes(k)) : [];
   tests.forEach(name => {
-    if (name === 'Asa-Total') return; // handled separately as Neobase 2 header
+    if (kitReps.includes(name)) return;
     if (isTotalsTab && hasMsms && !GSP_TESTS.has(name)) msmsTests.push(name);
     else regularTests.push(name);
   });
