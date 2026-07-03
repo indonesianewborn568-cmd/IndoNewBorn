@@ -533,7 +533,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     let r = '<tr' + (isMsmsMember ? ' class="kit-row ' + panelClass + '" style="display:none"' : '') + '><td title="' + name + '"' + (isMsmsMember ? ' style="padding-left:32px;color:var(--muted);font-size:11px"' : '') + '>' + name + '</td>';
     months.forEach((v,i) => {
       if (includeInGrandTotal) colTotals[i] += v;
-      r += '<td' + (i===curMonth?' class="cur"':'')' + (isMsmsMember ? ' style="color:var(--muted);font-size:11px"' : '') + '>' + (v||'—') + '</td>';
+      r += '<td' + (i===curMonth?' class="cur"':'') + (isMsmsMember ? ' style="color:var(--muted);font-size:11px"' : '') + '>' + (v||'\u2014') + '</td>';
     });
     r += '<td style="font-weight:' + (isMsmsMember ? '400;color:var(--muted);font-size:11px' : '500') + '">' + ytd.toLocaleString() + '</td></tr>';
     return r;
