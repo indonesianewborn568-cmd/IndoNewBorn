@@ -523,26 +523,28 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     else regularTests.push(name);
   });
 
-  function renderRow(name, isMsmsMember) {
+
+  function renderRow(name, panelClass) {
+    const isMsmsMember = !!panelClass;
     const months = MONTHS.map((_,i) => dataMap[name+'|'+(i+1)] || 0);
     const ytd = months.reduce((a,b)=>a+b,0);
     const includeInGrandTotal = !isMsmsMember;
     if (includeInGrandTotal) grandTotal += ytd;
-    let r = '<tr' + (isMsmsMember ? ' class="msms-row" style="display:none"' : '') + '><td title="' + name + '"' + (isMsmsMember ? ' style="padding-left:32px;color:var(--muted);font-size:11px"' : '') + '>' + name + '</td>';
+    let r = '<tr' + (isMsmsMember ? ' class="kit-row ' + panelClass + '" style="display:none"' : '') + '><td title="' + name + '"' + (isMsmsMember ? ' style="padding-left:32px;color:var(--muted);font-size:11px"' : '') + '>' + name + '</td>';
     months.forEach((v,i) => {
       if (includeInGrandTotal) colTotals[i] += v;
-      r += '<td' + (i===curMonth?' class="cur"':'') + (isMsmsMember ? ' style="color:var(--muted);font-size:11px"' : '') + '>' + (v||'—') + '</td>';
+      r += '<td' + (i===curMonth?' class="cur"':'')' + (isMsmsMember ? ' style="color:var(--muted);font-size:11px"' : '') + '>' + (v||'—') + '</td>';
     });
     r += '<td style="font-weight:' + (isMsmsMember ? '400;color:var(--muted);font-size:11px' : '500') + '">' + ytd.toLocaleString() + '</td></tr>';
     return r;
   }
 
-  function renderC0SummaryRow(name) {
-    const months = MONTHS.map((_,i) => dataMap[name+'|'+(i+1)] || 0);
+  function renderKitSummaryRow(repName, kitLabel, panelId) {
+    const months = MONTHS.map((_,i) => dataMap[repName+'|'+(i+1)] || 0);
     const ytd = months.reduce((a,b)=>a+b,0);
     grandTotal += ytd;
-    let r = '<tr><td title="Neobase 2, represented by Asa-Total" style="cursor:pointer" onclick="toggleMsmsPanel(this)">' +
-            '<span id="msms-caret" style="display:inline-block;width:14px">&#9656;</span> Neobase 2 (' + name + ')</td>';
+    let r = '<tr><td title="' + kitLabel + ', represented by ' + repName + '" style="cursor:pointer" onclick="toggleKitPanel(this,\'' + panelId + '\')">' +
+            '<span id="caret-' + panelId + '" style="display:inline-block;width:14px">&#9656;</span> ' + kitLabel + ' (' + repName + ')</td>';
     months.forEach((v,i) => {
       colTotals[i] += v;
       r += '<td' + (i===curMonth?' class="cur"':'') + '>' + (v||'—') + '</td>';
@@ -551,18 +553,26 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
     return r;
   }
 
-  // Render Neobase 2 header row first if MSMS is in view and Asa-Total exists
+  // Render each MSMS kit as a collapsible panel
   let rows = '';
-  if (isTotalsTab && hasMsms && tests.includes('Asa-Total')) {
-    rows += renderC0SummaryRow('Asa-Total');
+  if (isTotalsTab && hasMsms) {
+    kitReps.forEach(repName => {
+      const kit = MSMS_KITS[repName];
+      const panelId = repName.replace(/[^a-zA-Z0-9]/g, '_');
+      rows += renderKitSummaryRow(repName, kit.label, panelId);
+      let members;
+      if (repName === 'GUAC') {
+        members = msmsTests.filter(n => n.startsWith('GUAC') || n === 'CRE');
+      } else {
+        const guacMembers = msmsTests.filter(n => n.startsWith('GUAC') || n === 'CRE');
+        members = msmsTests.filter(n => !guacMembers.includes(n));
+      }
+      members.forEach(name => { rows += renderRow(name, 'kit-' + panelId); });
+    });
   }
   // Regular GSP rows
   regularTests.forEach(name => {
-    rows += renderRow(name, false);
-  });
-  // MSMS member rows (hidden by default, revealed when Neobase 2 header clicked)
-  msmsTests.forEach(name => {
-    rows += renderRow(name, true);
+    rows += renderRow(name, null);
   });
 
   rows += '<tr class="total-row"><td>Total' + (isTotalsTab && hasMsms ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(MSMS counted via Asa-Total)</span>' : '') + '</td>';
@@ -572,12 +582,12 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
   return { colTotals, grandTotal };
 }
 
-function toggleMsmsPanel(cell) {
+function toggleKitPanel(cell, panelId) {
   const tbody = cell.closest('tbody');
-  const msmsRows = tbody.querySelectorAll('.msms-row');
-  const caret = document.getElementById('msms-caret');
-  const isHidden = msmsRows[0] && msmsRows[0].style.display === 'none';
-  msmsRows.forEach(r => r.style.display = isHidden ? '' : 'none');
+  const kitRows = tbody.querySelectorAll('.kit-' + panelId);
+  const caret = document.getElementById('caret-' + panelId);
+  const isHidden = kitRows[0] && kitRows[0].style.display === 'none';
+  kitRows.forEach(r => r.style.display = isHidden ? '' : 'none');
   if (caret) caret.innerHTML = isHidden ? '&#9662;' : '&#9656;';
 }
 
