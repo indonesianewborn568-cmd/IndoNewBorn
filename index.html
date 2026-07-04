@@ -185,10 +185,11 @@
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Pushed at (local)</th>
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Pushed at (UTC)</th>
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Time ago</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Diff</th>
           </tr>
         </thead>
         <tbody id="push-log-tbody">
-          <tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>
+          <tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1853,12 +1854,12 @@ async function purgeOldPushLogs() {
 async function loadPushLog() {
   const tbody = document.getElementById('push-log-tbody');
   const filter = document.getElementById('push-log-filter').value;
-  tbody.innerHTML = '<tr><td colspan="4" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>';
 
   purgeOldPushLogs(); // fire-and-forget, throttled internally
 
   try {
-    let path = 'push_log?select=hostname,display_name,pushed_at&order=pushed_at.desc&limit=100';
+    let path = 'push_log?select=id,hostname,display_name,pushed_at&order=pushed_at.desc&limit=100';
     if (filter !== 'all') path += '&hostname=eq.' + encodeURIComponent(filter);
 
     // Load all instruments/sites/countries for site+country lookup (cache after first load)
@@ -1895,7 +1896,7 @@ async function loadPushLog() {
     });
 
     if (!rows || rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--muted)">No push records yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--muted)">No push records yet.</td></tr>';
       return;
     }
 
@@ -1931,10 +1932,14 @@ async function loadPushLog() {
         '<td style="padding:7px 10px;text-align:center;color:var(--muted);white-space:nowrap">' + local + '</td>' +
         '<td style="padding:7px 10px;text-align:center;color:var(--muted);font-size:11px;white-space:nowrap">' + utcStr + '</td>' +
         '<td style="padding:7px 10px;text-align:center;color:var(--muted);white-space:nowrap">' + ago + '</td>' +
+        '<td style="padding:7px 10px;text-align:center;white-space:nowrap">' +
+          '<a href="diff.html?id=' + encodeURIComponent(r.id) + '" target="_blank" rel="noopener" ' +
+          'style="color:var(--blue);text-decoration:none;font-size:11px;font-weight:500;">View diff &rarr;</a>' +
+        '</td>' +
         '</tr>';
     }).join('');
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:2rem;text-align:center;color:#c0392b">Error: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:#c0392b">Error: ' + e.message + '</td></tr>';
   }
 }
 
