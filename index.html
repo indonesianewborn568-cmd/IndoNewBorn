@@ -175,16 +175,16 @@
         <button class="btn" onclick="togglePushLog()" style="font-size:12px">Close</button>
       </div>
     </div>
-    <div style="overflow-x:auto;">
+    <div id="push-log-scroll" style="overflow-x:auto;overflow-y:auto;max-height:340px;border:0.5px solid var(--border);border-radius:var(--radius);">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr style="border-bottom:0.5px solid var(--border);">
-            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap">Instrument</th>
-            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap">Site</th>
-            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap">Country</th>
-            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap">Pushed at (local)</th>
-            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap">Pushed at (UTC)</th>
-            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap">Time ago</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Instrument</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Site</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Country</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Pushed at (local)</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Pushed at (UTC)</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Time ago</th>
           </tr>
         </thead>
         <tbody id="push-log-tbody">
@@ -1818,10 +1818,44 @@ function togglePushLog() {
   if (!isVisible) loadPushLog();
 }
 
+// ─────────────────────────────────────────────────────────────
+// SCOPE WARNING: This purge acts ONLY on the Supabase `push_log` table
+// (cloud DB). It must NEVER be extended to touch the local on-prem
+// instrument databases (LifeCycle DB on each PC). No delete, update,
+// or any write/alter operation of any kind is permitted against the
+// local DB from this dashboard or any related script — local DB
+// access from this codebase is SELECT-only, always.
+// ─────────────────────────────────────────────────────────────
+// Deletes push_log rows older than 30 days. Throttled to run at most once per
+// hour (per browser) so we don't fire a DELETE on every single refresh.
+async function purgeOldPushLogs() {
+  const THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+  const lastPurge = parseInt(localStorage.getItem('nbs_push_log_last_purge') || '0', 10);
+  if (Date.now() - lastPurge < THROTTLE_MS) return;
+
+  try {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    await fetch(SUPABASE_URL + '/rest/v1/push_log?pushed_at=lt.' + encodeURIComponent(cutoff), {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Prefer': 'return=minimal'
+      }
+    });
+    localStorage.setItem('nbs_push_log_last_purge', String(Date.now()));
+  } catch (e) {
+    // Non-fatal — just means old rows stick around until the next successful attempt.
+    console.warn('Push log purge failed:', e.message);
+  }
+}
+
 async function loadPushLog() {
   const tbody = document.getElementById('push-log-tbody');
   const filter = document.getElementById('push-log-filter').value;
   tbody.innerHTML = '<tr><td colspan="4" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>';
+
+  purgeOldPushLogs(); // fire-and-forget, throttled internally
 
   try {
     let path = 'push_log?select=hostname,display_name,pushed_at&order=pushed_at.desc&limit=100';
