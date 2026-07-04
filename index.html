@@ -291,23 +291,32 @@ function clearError() {
 
 // ── Supabase calls ────────────────────────────────────────────
 async function sbRpc(fn, params = {}) {
-  // Use GET with query params so Range header works for pagination
-  const qs = Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
-  const url = SUPABASE_URL + '/rest/v1/rpc/' + fn + (qs ? '?' + qs : '');
-  const resp = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': 'Bearer ' + SUPABASE_KEY,
-      'Range': '0-9999',
-      'Prefer': 'count=none'
+  // Paginate to get all rows beyond Supabase's 1000 row default limit
+  const PAGE = 1000;
+  let all = [], offset = 0;
+  while (true) {
+    const qs = Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+    const url = SUPABASE_URL + '/rest/v1/rpc/' + fn + (qs ? '?' + qs : '');
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Range': offset + '-' + (offset + PAGE - 1),
+        'Prefer': 'count=none'
+      }
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(function() { return {}; });
+      throw new Error(JSON.stringify(err));
     }
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(function() { return {}; });
-    throw new Error(JSON.stringify(err));
+    const page = await resp.json();
+    if (!page || page.length === 0) break;
+    all = all.concat(page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
   }
-  return resp.json();
+  return all;
 }
 async function sbFrom(table, params = {}) {
   let q = _sb.from(table).select(params.select || '*');
