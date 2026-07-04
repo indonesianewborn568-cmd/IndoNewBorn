@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBS Analytics — Push Diff</title>
+<style>
+  :root {
+    --bg:#ffffff;--surface:#fff;--border:rgba(0,0,0,0.1);--border-strong:rgba(0,0,0,0.18);
+    --text:#1a1a18;--muted:#6b6b68;--blue:#185FA5;--blue-bg:#E6F1FB;--blue-text:#0C447C;
+    --teal:#1D9E75;--metric:#f1efe8;--radius:8px;--radius-lg:12px;
+    --up:#1D9E75;--up-bg:#E4F6EE;--down:#c0392b;--down-bg:#FBEAEA;
+  }
+  @media(prefers-color-scheme:dark){:root{
+    --bg:#000000;--surface:#111110;--border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.22);
+    --text:#f0f0ec;--muted:#9a9a96;--blue:#85B7EB;--blue-bg:#042C53;--blue-text:#B5D4F4;
+    --teal:#5DCAA5;--metric:#1a1a18;--up:#5DCAA5;--up-bg:#0E2A20;--down:#e07c72;--down-bg:#3A1414;
+  }}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;}
+  .container{max-width:900px;margin:0 auto;padding:2rem 1.5rem;}
+  .back{font-size:12px;color:var(--muted);text-decoration:none;display:inline-block;margin-bottom:1rem;}
+  .back:hover{color:var(--text);}
+  h1{font-size:18px;font-weight:500;margin-bottom:4px;}
+  .sub{font-size:13px;color:var(--muted);margin-bottom:1.5rem;}
+  .push-compare{display:flex;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap;}
+  .push-card{flex:1;min-width:220px;background:var(--metric);border-radius:var(--radius);padding:12px 14px;}
+  .push-card .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;}
+  .push-card .value{font-size:14px;font-weight:500;}
+  .push-card .value-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:1.5rem;}
+  @media(max-width:600px){.summary{grid-template-columns:1fr;}}
+  .metric{background:var(--metric);border-radius:var(--radius);padding:14px 16px;}
+  .metric-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
+  .metric-value{font-size:22px;font-weight:500;}
+  .table-wrap{overflow-x:auto;border:0.5px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:center;padding:9px 12px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;border-bottom:0.5px solid var(--border);position:sticky;top:0;background:var(--surface);}
+  td{padding:8px 12px;text-align:center;white-space:nowrap;border-bottom:0.5px solid var(--border);}
+  tr:last-child td{border-bottom:none;}
+  .test-name{text-align:left !important;font-weight:500;}
+  .delta{font-weight:600;padding:2px 8px;border-radius:6px;display:inline-block;min-width:36px;}
+  .delta.up{color:var(--up);background:var(--up-bg);}
+  .delta.down{color:var(--down);background:var(--down-bg);}
+  .delta.flat{color:var(--muted);background:var(--metric);}
+  .msg{padding:3rem 1rem;text-align:center;color:var(--muted);font-size:13px;}
+  .msg strong{color:var(--text);}
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="javascript:window.close()" class="back">&larr; Close</a>
+  <h1 id="page-title">Push Diff</h1>
+  <div class="sub" id="page-sub">Loading…</div>
+
+  <div class="push-compare" id="push-compare" style="display:none;"></div>
+  <div class="summary" id="summary" style="display:none;"></div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">Test</th>
+          <th>Previous Total</th>
+          <th>Current Total</th>
+          <th>&Delta; Total</th>
+          <th>Previous Elevated</th>
+          <th>Current Elevated</th>
+          <th>&Delta; Elevated</th>
+        </tr>
+      </thead>
+      <tbody id="diff-tbody">
+        <tr><td colspan="7" class="msg">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://ngplytucjattrffxbxig.supabase.co";
+const SUPABASE_KEY = "sb_publishable_rXQ-JeJJ1Zj0aruVzRmLBg_XVGcn3dd";
+
+function qp(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+async function sbGet(path) {
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+  });
+  if (!resp.ok) throw new Error('Supabase request failed (' + resp.status + ')');
+  return resp.json();
+}
+
+function fmtDelta(delta) {
+  if (delta > 0) return '<span class="delta up">+' + delta + '</span>';
+  if (delta < 0) return '<span class="delta down">' + delta + '</span>';
+  return '<span class="delta flat">0</span>';
+}
+
+async function load() {
+  const id = qp('id');
+  const tbody = document.getElementById('diff-tbody');
+  const titleEl = document.getElementById('page-title');
+  const subEl = document.getElementById('page-sub');
+
+  if (!id) {
+    subEl.textContent = '';
+    tbody.innerHTML = '<tr><td colspan="7" class="msg">No push record specified.</td></tr>';
+    return;
+  }
+
+  try {
+    const current = await sbGet('push_log?select=id,hostname,display_name,pushed_at,snapshot&id=eq.' + encodeURIComponent(id));
+    if (!current || current.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="msg">Push record not found.</td></tr>';
+      return;
+    }
+    const curRow = current[0];
+    const name = curRow.display_name || curRow.hostname;
+    titleEl.textContent = name + ' — Push Diff';
+
+    // Previous push for the same instrument, strictly before this one
+    const prevRows = await sbGet(
+      'push_log?select=id,hostname,display_name,pushed_at,snapshot&hostname=eq.' + encodeURIComponent(curRow.hostname) +
+      '&pushed_at=lt.' + encodeURIComponent(curRow.pushed_at) +
+      '&order=pushed_at.desc&limit=1'
+    );
+    const prevRow = (prevRows && prevRows.length) ? prevRows[0] : null;
+
+    const curTime = new Date(curRow.pushed_at);
+    subEl.textContent = curRow.hostname + ' — comparing against ' + (prevRow ? 'the previous push' : 'no earlier push found');
+
+    // Render the two push cards
+    const compareEl = document.getElementById('push-compare');
+    compareEl.style.display = 'flex';
+    compareEl.innerHTML =
+      '<div class="push-card"><div class="label">Previous push</div>' +
+        '<div class="value">' + (prevRow ? new Date(prevRow.pushed_at).toLocaleString() : '—') + '</div>' +
+        '<div class="value-sub">' + (prevRow ? 'baseline for this comparison' : 'none on record yet') + '</div>' +
+      '</div>' +
+      '<div class="push-card"><div class="label">This push</div>' +
+        '<div class="value">' + curTime.toLocaleString() + '</div>' +
+        '<div class="value-sub">current snapshot</div>' +
+      '</div>';
+
+    if (!curRow.snapshot) {
+      tbody.innerHTML = '<tr><td colspan="7" class="msg"><strong>No snapshot data on this push.</strong><br>' +
+        'This push happened before per-push count snapshots were enabled, so there\'s nothing to diff against. ' +
+        'Future pushes will show a full diff here.</td></tr>';
+      return;
+    }
+    if (!prevRow || !prevRow.snapshot) {
+      tbody.innerHTML = '<tr><td colspan="7" class="msg"><strong>No earlier snapshot to compare against.</strong><br>' +
+        'This looks like the first recorded push for this instrument (or the previous one predates snapshotting). ' +
+        'The next push will show a full diff here.</td></tr>';
+      return;
+    }
+
+    const curMap = {};
+    (curRow.snapshot || []).forEach(t => curMap[t.test_name] = t);
+    const prevMap = {};
+    (prevRow.snapshot || []).forEach(t => prevMap[t.test_name] = t);
+
+    const allNames = Array.from(new Set([...Object.keys(curMap), ...Object.keys(prevMap)])).sort();
+
+    let totalDelta = 0, elevatedDelta = 0, testsIncreased = 0;
+    const rowsHtml = allNames.map(name => {
+      const cur = curMap[name] || { total_count: 0, elevated_count: 0 };
+      const prev = prevMap[name] || { total_count: 0, elevated_count: 0 };
+      const dTotal = (cur.total_count || 0) - (prev.total_count || 0);
+      const dElev = (cur.elevated_count || 0) - (prev.elevated_count || 0);
+      totalDelta += dTotal;
+      elevatedDelta += dElev;
+      if (dTotal > 0) testsIncreased++;
+      return '<tr>' +
+        '<td class="test-name">' + name + '</td>' +
+        '<td>' + (prev.total_count ?? 0) + '</td>' +
+        '<td>' + (cur.total_count ?? 0) + '</td>' +
+        '<td>' + fmtDelta(dTotal) + '</td>' +
+        '<td>' + (prev.elevated_count ?? 0) + '</td>' +
+        '<td>' + (cur.elevated_count ?? 0) + '</td>' +
+        '<td>' + fmtDelta(dElev) + '</td>' +
+        '</tr>';
+    }).join('');
+
+    tbody.innerHTML = rowsHtml || '<tr><td colspan="7" class="msg">No test data in either snapshot.</td></tr>';
+
+    const summaryEl = document.getElementById('summary');
+    summaryEl.style.display = 'grid';
+    summaryEl.innerHTML =
+      '<div class="metric"><div class="metric-label">Tests with new counts</div><div class="metric-value">' + testsIncreased + ' / ' + allNames.length + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Total count change</div><div class="metric-value">' + (totalDelta >= 0 ? '+' : '') + totalDelta + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Elevated count change</div><div class="metric-value">' + (elevatedDelta >= 0 ? '+' : '') + elevatedDelta + '</div></div>';
+
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="msg" style="color:#c0392b">Error: ' + e.message + '</td></tr>';
+  }
+}
+
+load();
+</script>
+</body>
+</html>
