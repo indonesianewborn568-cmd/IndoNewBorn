@@ -301,6 +301,20 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 // Known GSP (standard instrument) test names.
 // Everything else is treated as an MSMS analyte when an MSMS instrument is in the view.
 // This avoids maintaining a hardcoded MSMS analyte list that breaks when new analytes appear.
+// Instruments hidden from anyone without the admin token. Fully invisible:
+// excluded from every dropdown, total, Push Log, Breakdown, and export.
+// Matches by DISPLAY NAME rather than hostname, so any instrument -- present
+// or added in the future -- named one of these is automatically restricted,
+// without needing a code change each time a new one is registered.
+const RESTRICTED_DISPLAY_NAMES = new Set(['V2D']);
+function isRestrictedName(name) {
+  return !!name && RESTRICTED_DISPLAY_NAMES.has(String(name).trim().toUpperCase());
+}
+function isAdminUser() {
+  const user = window._currentUser;
+  return !!(user && user.role === 'admin');
+}
+
 const GSP_TESTS = new Set(["TSH","G6PD","N17P","IRT","GALT","CKMM","N17OHP","PKU","CHT","CAH","GAL","CF","SCD","BIOTINIDASE","HGB","HbS","Phe","17-OHP"]);
 
 // MSMS kit representatives -- shared between the main table view and the
@@ -457,7 +471,14 @@ async function init() {
 
     // Load instruments
     const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id,active', order: 'display_name.asc' });
-    window._instruments = instrs || [];
+    // Track restricted instrument IDs (matched by CURRENT display_name)
+    // BEFORE filtering the main list, so RPC-result filtering elsewhere
+    // (loadData, loadBreakdown) still knows which instrument_id to exclude
+    // even though it no longer appears in window._instruments for non-admins.
+    window._restrictedInstrumentIds = new Set(
+      (instrs || []).filter(i => !isAdminUser() && isRestrictedName(i.display_name)).map(i => i.id)
+    );
+    window._instruments = (instrs || []).filter(i => isAdminUser() || !isRestrictedName(i.display_name));
     // Active instruments only shown in dropdown and count, filtered by default country
     const activeInstrs = window._instruments.filter(i => i.active !== false);
     const isel = document.getElementById('instrument-select');
@@ -525,7 +546,8 @@ async function loadData() {
     const overrides = getUserFilterOverrides();
     if (overrides.country_id && !fnParams.p_instrument_id && !fnParams.p_site_id) fnParams.p_country_id = overrides.country_id;
     if (overrides.site_id && !fnParams.p_instrument_id) fnParams.p_site_id = overrides.site_id;
-    const rows = await sbRpc('get_monthly_report', fnParams);
+    const rows = ((await sbRpc('get_monthly_report', fnParams)) || [])
+      .filter(r => !(window._restrictedInstrumentIds || new Set()).has(r.instrument_id));
 
     const countryLabel = country === 'all' ? 'All countries'
       : (window._countries || []).find(c => c.id == country)?.country_name || country;
@@ -807,9 +829,8 @@ async function loadBreakdown() {
       if (overrides.site_id) fnParams.p_site_id = overrides.site_id;
     }
 
-    const rows = await sbRpc('get_monthly_report', fnParams);
-
-    // Detect MSMS scope the same way the main table does, so the test
+    const rows = ((await sbRpc('get_monthly_report', fnParams)) || [])
+      .filter(r => !(window._restrictedInstrumentIds || new Set()).has(r.instrument_id));
     // filter's kit labels (e.g. "Neobase 2") resolve consistently.
     const instrIdsInRows = new Set((rows || []).map(r => r.instrument_id));
     const hasMsms = (window._instruments || []).some(instr => {
@@ -2093,7 +2114,15 @@ async function loadPushLog() {
         fetch(SUPABASE_URL + '/rest/v1/sites?select=id,site_name,country_id', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }),
         fetch(SUPABASE_URL + '/rest/v1/countries?select=id,country_name', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } })
       ]);
-      window._allInstruments = await instResp.json();
+      const allInstrs = await instResp.json();
+      // Resolve restricted hostnames live, by CURRENT display_name -- not
+      // push_log's stored snapshot, which could be stale (e.g. before a
+      // rename, or before this instrument existed at all). Cached so the
+      // rows filter below can reuse it on every call, not just first load.
+      window._pushLogRestrictedHostnames = new Set(
+        (allInstrs || []).filter(i => isRestrictedName(i.display_name)).map(i => i.hostname)
+      );
+      window._allInstruments = (allInstrs || []).filter(i => isAdminUser() || !isRestrictedName(i.display_name));
       window._allSites       = await siteResp.json();
       window._allCountries   = await countryResp.json();
     }
@@ -2101,7 +2130,14 @@ async function loadPushLog() {
     const resp = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
     });
-    const rows = await resp.json();
+    const rawRows = await resp.json();
+    // Fully hide restricted instruments' push history from non-admins --
+    // they never appear in the log, the filter dropdown, or contribute to
+    // anything derived from these rows. Matches by hostname against the
+    // live-resolved set above, so it covers every historical row for that
+    // physical instrument, not just ones pushed after it was named V2D.
+    const restrictedHostnames = window._pushLogRestrictedHostnames || new Set();
+    const rows = (rawRows || []).filter(r => isAdminUser() || !restrictedHostnames.has(r.hostname));
 
     // Populate filter dropdown with unique instruments
     const filterSel = document.getElementById('push-log-filter');
