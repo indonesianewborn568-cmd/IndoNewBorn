@@ -239,8 +239,7 @@
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="manage-users-btn" onclick="toggleUserPanel()" style="display:none" title="Manage user access">&#128100; Users</button>
     <button class="btn" id="push-log-btn" onclick="togglePushLog()" style="display:none" title="View push log">&#128203; Push Log</button>
-    <button class="btn" id="push-btn" onclick="triggerPush()" style="display:none" title="Admin only — trigger push from instrument PC">&#8593; Push from instrument</button>
-    <button class="btn" id="reset-push-btn" onclick="triggerResetPush()" style="display:none" title="Admin only — clear last push date for one instrument then trigger full re-push">&#8635; Reset &amp; Full Push</button>
+    <button class="btn" id="reset-push-btn" onclick="triggerResetPush()" style="display:none" title="Admin only — clear last push date for one instrument then trigger full re-push (kept as a fallback, in case it's ever needed)">&#8635; Reset</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
   </div>
@@ -1348,45 +1347,6 @@ function exportCSV() {
   a.click();
 }
 
-// ── Push from instrument (webhook) ────────────────────────────
-async function triggerPush() {
-  const btn = document.getElementById('push-btn');
-  btn.textContent = 'Pushing...';
-  btn.disabled = true;
-  try {
-    // Fetch all active instrument webhook URLs from instrument_config
-    const resp = await fetch(SUPABASE_URL + '/rest/v1/instrument_config?select=hostname,display_name,webhook_url&webhook_url=not.is.null', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-    });
-    const configs = await resp.json();
-    const active = configs.filter(c => c.webhook_url);
-    if (active.length === 0) {
-      alert('No instrument webhook URLs registered yet. Run Push-Now.bat on each instrument PC first to self-register.');
-      btn.textContent = '↑ Push from instrument';
-      btn.disabled = false;
-      return;
-    }
-    // Fire all webhooks simultaneously
-    let fired = 0;
-    await Promise.allSettled(active.map(async c => {
-      try {
-        await fetch(c.webhook_url, { method: 'GET', mode: 'no-cors' });
-        fired++;
-      } catch(e) {}
-    }));
-    btn.textContent = 'Push sent to ' + active.length + ' PC(s)! Refreshing in 30s...';
-    setTimeout(async () => {
-      await init();
-      btn.textContent = '↑ Push from instrument';
-      btn.disabled = false;
-    }, 30000);
-  } catch(e) {
-    btn.textContent = '↑ Push from instrument';
-    btn.disabled = false;
-    alert('Push failed: ' + e.message);
-  }
-}
-
 // ── Reset & Full Push ────────────────────────────────────────
 async function triggerResetPush() {
   // Fetch all active instruments with their webhook URLs
@@ -1457,11 +1417,11 @@ async function triggerResetPush() {
     btn.textContent = 'Full push sent to ' + withWebhook.length + ' PC(s)! Refreshing in 60s...';
     setTimeout(async () => {
       await init();
-      btn.textContent = '↺ Reset & Full Push';
+      btn.textContent = '↺ Reset';
       btn.disabled = false;
     }, 60000);
   } catch(e) {
-    btn.textContent = '↺ Reset & Full Push';
+    btn.textContent = '↺ Reset';
     btn.disabled = false;
     alert('Reset failed: ' + e.message);
   }
@@ -1703,7 +1663,7 @@ function applyUserRestrictions() {
 
   // Hide ALL edit controls for non-admins
   if (!isAdmin) {
-    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','push-btn','reset-push-btn','manage-users-btn','push-log-btn'].forEach(id => {
+    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','reset-push-btn','manage-users-btn','push-log-btn'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -1711,11 +1671,10 @@ function applyUserRestrictions() {
     window._nonAdminMode = true;
   }
 
-  // Show user management and push button for admins only
+  // Show user management and reset button for admins only
   if (isAdmin) {
     document.getElementById('manage-users-btn').style.display = 'inline-flex';
     document.getElementById('push-log-btn').style.display = 'inline-flex';
-    document.getElementById('push-btn').style.display = 'inline-flex';
     document.getElementById('reset-push-btn').style.display = 'inline-flex';
   }
 }
