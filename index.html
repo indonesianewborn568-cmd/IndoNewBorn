@@ -363,10 +363,14 @@ async function init() {
     });
     if (!sel.value) sel.value = uniqueYears[0];
 
-    // Load countries -- default to Indonesia if present
+    // Load countries -- default to Indonesia only on first load; preserve
+    // whatever the user already has selected on subsequent init() re-runs
+    // (rename/move/delink/etc. all call init() to refresh, and previously
+    // this silently reset the filter back to Indonesia every time).
     const countriesData = await sbFrom('countries', { select: 'id,country_name', order: 'country_name.asc' });
     window._countries = countriesData || [];
     const csel = document.getElementById('country-select');
+    const previousCountryVal = csel.value; // capture BEFORE rebuilding options
     csel.innerHTML = '<option value="all">All countries</option>';
     let defaultCountryId = 'all';
     window._countries.forEach(c => {
@@ -381,6 +385,10 @@ async function init() {
       defaultCountryId = userOverrides.country_id;
       csel.value = defaultCountryId;
       csel.disabled = true;
+    } else if (previousCountryVal) {
+      // Re-init (not first load): keep the user's existing selection
+      defaultCountryId = previousCountryVal;
+      csel.value = defaultCountryId;
     } else {
       csel.value = defaultCountryId;
     }
@@ -389,6 +397,7 @@ async function init() {
     const sitesData = await sbFrom('sites', { select: 'id,site_name,country_id', order: 'site_name.asc' });
     window._sites = sitesData || [];
     const ssel = document.getElementById('site-select');
+    const previousSiteVal = ssel.value; // capture BEFORE rebuilding options
     ssel.innerHTML = '<option value="all">All sites</option>';
     window._sites.forEach(site => {
       if (defaultCountryId !== 'all' && site.country_id != defaultCountryId) return;
@@ -397,6 +406,9 @@ async function init() {
       o.dataset.countryId = site.country_id;
       ssel.appendChild(o);
     });
+    if (previousSiteVal && Array.from(ssel.options).some(o => o.value === previousSiteVal)) {
+      ssel.value = previousSiteVal;
+    }
 
     // Load instruments
     const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id,active', order: 'display_name.asc' });
@@ -404,6 +416,7 @@ async function init() {
     // Active instruments only shown in dropdown and count, filtered by default country
     const activeInstrs = window._instruments.filter(i => i.active !== false);
     const isel = document.getElementById('instrument-select');
+    const previousInstrVal = isel.value; // capture BEFORE rebuilding options
     isel.innerHTML = '<option value="all">All instruments</option>';
     activeInstrs.forEach(instr => {
       if (defaultCountryId !== 'all') {
@@ -416,6 +429,9 @@ async function init() {
       o.dataset.siteId = instr.site_id;
       isel.appendChild(o);
     });
+    if (previousInstrVal && Array.from(isel.options).some(o => o.value === previousInstrVal)) {
+      isel.value = previousInstrVal;
+    }
     document.getElementById('m-instruments').textContent = activeInstrs.length;
     // Lock site dropdown for site_manager
     if (userOverrides && userOverrides.site_id) {
