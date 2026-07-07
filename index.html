@@ -367,6 +367,7 @@ async function init() {
     // whatever the user already has selected on subsequent init() re-runs
     // (rename/move/delink/etc. all call init() to refresh, and previously
     // this silently reset the filter back to Indonesia every time).
+    const isFirstLoad = !window._countries; // true only before init() has ever populated this
     const countriesData = await sbFrom('countries', { select: 'id,country_name', order: 'country_name.asc' });
     window._countries = countriesData || [];
     const csel = document.getElementById('country-select');
@@ -385,7 +386,7 @@ async function init() {
       defaultCountryId = userOverrides.country_id;
       csel.value = defaultCountryId;
       csel.disabled = true;
-    } else if (previousCountryVal) {
+    } else if (!isFirstLoad && previousCountryVal) {
       // Re-init (not first load): keep the user's existing selection
       defaultCountryId = previousCountryVal;
       csel.value = defaultCountryId;
