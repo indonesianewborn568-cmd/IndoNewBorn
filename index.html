@@ -749,15 +749,10 @@ function populateBreakdownFilters() {
     csel.disabled = true;
   }
 
-  // Test dropdown -- static universe: GSP tests + MSMS kit labels
-  const tsel = document.getElementById('bd-test-select');
-  tsel.innerHTML = '<option value="all">All tests (Total volume)</option>';
-  const testGroups = [...GSP_TESTS].sort().concat(Object.values(MSMS_KITS).map(k => k.label));
-  testGroups.forEach(name => {
-    const o = document.createElement('option');
-    o.value = name; o.textContent = name;
-    tsel.appendChild(o);
-  });
+  // Test dropdown starts with just the default option -- the real list of
+  // tests gets populated dynamically in loadBreakdown(), scoped to whatever
+  // actually has data for the current filters (not every test that could
+  // theoretically exist anywhere in the system).
 }
 
 async function loadBreakdownYears() {
@@ -793,7 +788,7 @@ async function loadBreakdown() {
   const mode = window._bdMode || 'site';
   const year = document.getElementById('bd-year-select').value;
   if (!year) return;
-  const testGroup = document.getElementById('bd-test-select').value;
+  let testGroup = document.getElementById('bd-test-select').value;
   const countryFilter = document.getElementById('bd-country-select').value;
 
   const tbody = document.getElementById('bd-tbody');
@@ -823,6 +818,24 @@ async function loadBreakdown() {
       const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
       return cfg && cfg.instrument_type === 'msms';
     });
+
+    // Rebuild the Test dropdown to only list groups that actually have data
+    // in this scope (year/mode/country), instead of every test that could
+    // theoretically exist anywhere in the system. Preserve the current
+    // selection if it's still valid; otherwise fall back to "All tests".
+    const presentGroups = new Set();
+    (rows || []).forEach(r => presentGroups.add(resolveTestGroup(r.test_name, hasMsms)));
+    const sortedPresentGroups = [...presentGroups].sort();
+    const tsel = document.getElementById('bd-test-select');
+    const previousTestVal = tsel.value;
+    tsel.innerHTML = '<option value="all">All tests (Total volume)</option>';
+    sortedPresentGroups.forEach(name => {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      tsel.appendChild(o);
+    });
+    tsel.value = sortedPresentGroups.includes(previousTestVal) ? previousTestVal : 'all';
+    testGroup = tsel.value;
 
     // Aggregate by site or by country
     const groupSums = {}; // key -> { label, count }
