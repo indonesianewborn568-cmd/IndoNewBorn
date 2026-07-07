@@ -50,6 +50,10 @@
   .tab{font-size:13px;padding:7px 18px;cursor:pointer;color:var(--muted);background:var(--surface);border:none;font-family:inherit;transition:background .12s;}
   .tab:hover{background:var(--metric);}
   .tab.active{background:var(--metric);color:var(--text);font-weight:500;}
+  .tabs-sub{display:flex;border:0.5px solid var(--border-strong);border-radius:var(--radius);overflow:hidden;}
+  .tab-sub{font-size:13px;padding:7px 18px;cursor:pointer;color:var(--muted);background:var(--surface);border:none;font-family:inherit;transition:background .12s;}
+  .tab-sub:hover{background:var(--metric);}
+  .tab-sub.active{background:var(--metric);color:var(--text);font-weight:500;}
   select,button.btn{font-size:13px;padding:7px 12px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer;}
   button.btn:hover{background:var(--metric);}
   button.btn-primary{background:var(--blue);color:#fff;border-color:var(--blue);}
@@ -213,6 +217,7 @@
       <button class="tab active" onclick="showPanel('total',this)">Total</button>
       <button class="tab" onclick="showPanel('elevated',this)">Elevated</button>
       <button class="tab" onclick="showPanel('chart',this)">Trend chart</button>
+      <button class="tab" onclick="showPanel('breakdown',this)">Breakdown</button>
 
     </div>
     <select id="year-select" onchange="loadData()" title="Year"></select>
@@ -258,6 +263,32 @@
     </div>
   </div>
 
+  <div id="panel-breakdown" class="panel">
+    <p class="panel-title">Proportion of counts by site or country &#8212; independent filters from the tabs above</p>
+    <div class="toolbar" style="margin-bottom:1rem;">
+      <div class="tabs-sub">
+        <button class="tab-sub active" id="bd-mode-site-btn" onclick="setBreakdownMode('site')">By Site</button>
+        <button class="tab-sub" id="bd-mode-country-btn" onclick="setBreakdownMode('country')">By Country</button>
+      </div>
+      <select id="bd-country-select" onchange="loadBreakdown()" title="Country (scopes which sites are shown)">
+        <option value="all">All countries</option>
+      </select>
+      <select id="bd-test-select" onchange="loadBreakdown()" title="Test">
+        <option value="all">All tests (Total volume)</option>
+      </select>
+      <select id="bd-year-select" onchange="loadBreakdown()" title="Year"></select>
+    </div>
+    <div class="chart-card">
+      <div style="position:relative;height:340px"><canvas id="breakdownChart"></canvas></div>
+    </div>
+    <div class="table-wrap" style="margin-top:1rem;">
+      <table>
+        <thead><tr><th id="bd-table-label-col" style="text-align:left">Site</th><th>Count</th><th>% of total</th></tr></thead>
+        <tbody id="bd-tbody"><tr><td colspan="3" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 
@@ -272,6 +303,20 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 // Everything else is treated as an MSMS analyte when an MSMS instrument is in the view.
 // This avoids maintaining a hardcoded MSMS analyte list that breaks when new analytes appear.
 const GSP_TESTS = new Set(["TSH","G6PD","N17P","IRT","GALT","CKMM","N17OHP","PKU","CHT","CAH","GAL","CF","SCD","BIOTINIDASE","HGB","HbS","Phe","17-OHP"]);
+
+// MSMS kit representatives -- shared between the main table view and the
+// Breakdown tab, so test grouping stays consistent everywhere.
+const MSMS_KITS = {
+  'Asa-Total': { label: 'Neobase 2' },
+  'GUAC':      { label: 'GUAC kit'  }
+};
+// Resolves a raw test_name into the group it should be counted under:
+// its own name for GSP tests, or the kit label for MSMS analytes.
+function resolveTestGroup(name, hasMsms) {
+  if (!hasMsms || GSP_TESTS.has(name)) return name;
+  if (name.startsWith('GUAC') || name === 'CRE') return MSMS_KITS['GUAC'].label;
+  return MSMS_KITS['Asa-Total'].label;
+}
 const curMonth = new Date().getMonth();
 const curYear  = new Date().getFullYear();
 let chartInst = null;
@@ -546,10 +591,7 @@ function buildTable(theadId, tbodyId, tests, dataMap, year, isTotalsTab, hasMsms
   thead.innerHTML = hdr;
 
   // MSMS kit representatives -- each becomes a collapsible header row
-  const MSMS_KITS = {
-    'Asa-Total': { label: 'Neobase 2' },
-    'GUAC':      { label: 'GUAC kit'  }
-  };
+  // (MSMS_KITS is defined globally, shared with the Breakdown tab)
 
   // Classify tests
   const regularTests = [];
@@ -668,9 +710,188 @@ function showPanel(name, btn) {
   document.getElementById('panel-' + name).classList.add('active');
   if (btn) btn.classList.add('active');
   if (name === 'chart' && window._totStats) buildChart(window._totStats, window._elevStats);
+  if (name === 'breakdown') {
+    populateBreakdownFilters();
+    loadBreakdownYears().then(() => loadBreakdown());
+  }
 }
 
-// ── Refresh year dropdown based on current filters ───────────
+// ── Breakdown tab ──────────────────────────────────────────────
+let bdChartInst = null;
+
+function setBreakdownMode(mode) {
+  window._bdMode = mode;
+  document.getElementById('bd-mode-site-btn').classList.toggle('active', mode === 'site');
+  document.getElementById('bd-mode-country-btn').classList.toggle('active', mode === 'country');
+  // The country selector only makes sense as a *scoping* filter in "By Site"
+  // mode (it narrows which sites are compared); in "By Country" mode every
+  // country is shown, so hide it to avoid implying it does something there.
+  document.getElementById('bd-country-select').style.display = (mode === 'site') ? '' : 'none';
+  document.getElementById('bd-table-label-col').textContent = (mode === 'site') ? 'Site' : 'Country';
+  loadBreakdown();
+}
+
+function populateBreakdownFilters() {
+  if (window._bdFiltersInitialized) return;
+  window._bdFiltersInitialized = true;
+
+  // Country dropdown -- reuses window._countries, already loaded by init()
+  const csel = document.getElementById('bd-country-select');
+  csel.innerHTML = '<option value="all">All countries</option>';
+  (window._countries || []).forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.id; o.textContent = c.country_name;
+    csel.appendChild(o);
+  });
+  const overrides = getUserFilterOverrides();
+  if (overrides.country_id) {
+    csel.value = overrides.country_id;
+    csel.disabled = true;
+  }
+
+  // Test dropdown -- static universe: GSP tests + MSMS kit labels
+  const tsel = document.getElementById('bd-test-select');
+  tsel.innerHTML = '<option value="all">All tests (Total volume)</option>';
+  const testGroups = [...GSP_TESTS].sort().concat(Object.values(MSMS_KITS).map(k => k.label));
+  testGroups.forEach(name => {
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    tsel.appendChild(o);
+  });
+}
+
+async function loadBreakdownYears() {
+  const overrides = getUserFilterOverrides();
+  const params = {};
+  if (overrides.country_id) params.p_country_id = overrides.country_id;
+  else if (overrides.site_id) params.p_site_id = overrides.site_id;
+  try {
+    const yearsData = await sbRpc('get_available_years', params);
+    const uniqueYears = (yearsData || []).map(r => r.year);
+    const sel = document.getElementById('bd-year-select');
+    const currentYear = sel.value;
+    sel.innerHTML = '';
+    if (uniqueYears.length === 0) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = 'No data';
+      sel.appendChild(o);
+      return;
+    }
+    uniqueYears.forEach(y => {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      if (y == currentYear) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (!uniqueYears.includes(parseInt(currentYear))) sel.value = uniqueYears[0];
+  } catch(e) {
+    console.error('loadBreakdownYears error:', e);
+  }
+}
+
+async function loadBreakdown() {
+  const mode = window._bdMode || 'site';
+  const year = document.getElementById('bd-year-select').value;
+  if (!year) return;
+  const testGroup = document.getElementById('bd-test-select').value;
+  const countryFilter = document.getElementById('bd-country-select').value;
+
+  const tbody = document.getElementById('bd-tbody');
+  tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr>';
+
+  try {
+    const fnParams = { p_year: parseInt(year) };
+    const overrides = getUserFilterOverrides();
+    if (mode === 'site') {
+      if (countryFilter !== 'all') fnParams.p_country_id = parseInt(countryFilter);
+      else if (overrides.country_id) fnParams.p_country_id = overrides.country_id;
+      if (overrides.site_id) fnParams.p_site_id = overrides.site_id;
+    } else {
+      // "By Country" compares whole countries -- no scoping, except a
+      // restricted user is still limited to their own country/site.
+      if (overrides.country_id) fnParams.p_country_id = overrides.country_id;
+      if (overrides.site_id) fnParams.p_site_id = overrides.site_id;
+    }
+
+    const rows = await sbRpc('get_monthly_report', fnParams);
+
+    // Detect MSMS scope the same way the main table does, so the test
+    // filter's kit labels (e.g. "Neobase 2") resolve consistently.
+    const instrIdsInRows = new Set((rows || []).map(r => r.instrument_id));
+    const hasMsms = (window._instruments || []).some(instr => {
+      if (!instrIdsInRows.has(instr.id)) return false;
+      const cfg = (window._instrConfigs || []).find(c => c.hostname === instr.hostname);
+      return cfg && cfg.instrument_type === 'msms';
+    });
+
+    // Aggregate by site or by country
+    const groupSums = {}; // key -> { label, count }
+    (rows || []).forEach(r => {
+      if (testGroup !== 'all' && resolveTestGroup(r.test_name, hasMsms) !== testGroup) return;
+      const instr = (window._instruments || []).find(i => i.id === r.instrument_id);
+      if (!instr) return;
+      const site = (window._sites || []).find(s => s.id == instr.site_id);
+      if (!site) return;
+      let key, label;
+      if (mode === 'site') {
+        key = site.id; label = site.site_name;
+      } else {
+        const country = (window._countries || []).find(c => c.id == site.country_id);
+        if (!country) return;
+        key = country.id; label = country.country_name;
+      }
+      if (!groupSums[key]) groupSums[key] = { label, count: 0 };
+      groupSums[key].count += (r.total_count || 0);
+    });
+
+    const groups = Object.values(groupSums).sort((a,b) => b.count - a.count);
+    const grandTotal = groups.reduce((a,g) => a + g.count, 0);
+
+    if (groups.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:2rem;color:var(--muted)">No data for this selection.</td></tr>';
+    } else {
+      tbody.innerHTML = groups.map(g => {
+        const pct = grandTotal > 0 ? (g.count / grandTotal * 100) : 0;
+        return '<tr><td style="text-align:left">' + g.label + '</td><td>' + g.count.toLocaleString() + '</td><td>' + pct.toFixed(1) + '%</td></tr>';
+      }).join('');
+    }
+
+    const savedTheme = document.documentElement.getAttribute('data-theme');
+    const dark = savedTheme === 'dark' || (!savedTheme && matchMedia('(prefers-color-scheme:dark)').matches);
+    const palette = ['#378ADD','#1D9E75','#E8A33D','#C0587A','#8B6FC9','#4FB4B8','#D9764A','#6B8E4E','#B0559C','#5A7FBF'];
+    if (bdChartInst) { bdChartInst.destroy(); bdChartInst = null; }
+    bdChartInst = new Chart(document.getElementById('breakdownChart'), {
+      type: 'doughnut',
+      data: {
+        labels: groups.map(g => g.label),
+        datasets: [{
+          data: groups.map(g => g.count),
+          backgroundColor: groups.map((_,i) => palette[i % palette.length]),
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: dark ? '#9a9a96' : '#6b6b68', font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                const val = ctx.parsed;
+                const pct = grandTotal > 0 ? (val / grandTotal * 100).toFixed(1) : '0.0';
+                return ctx.label + ': ' + val.toLocaleString() + ' (' + pct + '%)';
+              }
+            }
+          }
+        }
+      }
+    });
+
+  } catch(e) {
+    console.error('loadBreakdown error:', e);
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:2rem;color:#c0392b">Error: ' + e.message + '</td></tr>';
+  }
+}
 async function refreshYears() {
   const country = document.getElementById('country-select').value;
   const site    = document.getElementById('site-select').value;
