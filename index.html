@@ -1900,7 +1900,7 @@ async function loadPushLog() {
         seen.add(r.hostname);
         const o = document.createElement('option');
         o.value = r.hostname;
-        o.textContent = r.display_name || r.hostname;
+        o.textContent = getInstrumentName(r.hostname) || r.display_name || r.hostname;
         if (r.hostname === currentVal) o.selected = true;
         filterSel.appendChild(o);
       }
@@ -1921,6 +1921,14 @@ async function loadPushLog() {
       return { site: site.site_name || '—', country: country ? country.country_name : '—' };
     }
 
+    // Resolve the instrument's CURRENT name from the canonical `instruments`
+    // table, rather than trusting the name snapshotted onto the push_log row
+    // at push time (which goes stale the moment the instrument is renamed).
+    function getInstrumentName(hostname) {
+      const instr = (window._allInstruments || []).find(i => i.hostname === hostname);
+      return instr ? instr.display_name : null;
+    }
+
     const now = new Date();
     tbody.innerHTML = rows.map(r => {
       const utc = new Date(r.pushed_at);
@@ -1934,7 +1942,7 @@ async function loadPushLog() {
         : diffMins < 60 ? diffMins + 'm ago'
         : diffHrs < 24 ? diffHrs + 'h ago'
         : diffDays + 'd ago';
-      const name = r.display_name || r.hostname;
+      const name = getInstrumentName(r.hostname) || r.display_name || r.hostname;
       const { site, country } = getSiteCountry(r.hostname);
       return '<tr style="border-bottom:0.5px solid var(--border)">' +
         '<td style="padding:7px 10px;text-align:center;color:var(--text);white-space:nowrap">' + name + '</td>' +
