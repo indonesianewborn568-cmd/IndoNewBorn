@@ -425,7 +425,9 @@ async function init() {
       }
       const o = document.createElement('option');
       o.value = instr.id;
-      o.textContent = instr.display_name;
+      const siteForLabel = window._sites.find(s => s.id == instr.site_id);
+      const siteLabel = siteForLabel ? siteForLabel.site_name : 'Unassigned';
+      o.textContent = instr.display_name + '  —  ' + siteLabel;
       o.dataset.siteId = instr.site_id;
       isel.appendChild(o);
     });
@@ -782,7 +784,8 @@ async function renameInstrument() {
   const sel = document.getElementById('instrument-select');
   const instrId = sel.value;
   if (instrId === 'all') return;
-  const current = sel.options[sel.selectedIndex].textContent;
+  const instrObj = (window._instruments || []).find(i => i.id == instrId);
+  const current = instrObj ? instrObj.display_name : sel.options[sel.selectedIndex].textContent;
   const newName = prompt('Rename "' + current + '" to:', current);
   if (!newName || newName === current) return;
   try {
