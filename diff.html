@@ -84,6 +84,17 @@ function qp(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
+// Same GSP whitelist used by the main dashboard. Anything NOT in this set,
+// for an MSMS-panel snapshot, is a component analyte (e.g. individual amino
+// acids) rather than a standalone reportable test -- only the kit's
+// representative row (Asa-Total / GUAC) should count toward summary totals,
+// otherwise the same sample gets counted once per analyte tracked.
+const GSP_TESTS = new Set(["TSH","G6PD","N17P","IRT","GALT","CKMM","N17OHP","PKU","CHT","CAH","GAL","CF","SCD","BIOTINIDASE","HGB","HbS","Phe","17-OHP"]);
+const MSMS_KIT_REP_NAMES = new Set(["Asa-Total", "GUAC"]);
+function isCountableTest(name) {
+  return GSP_TESTS.has(name) || MSMS_KIT_REP_NAMES.has(name);
+}
+
 async function sbGet(path) {
   const resp = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
@@ -163,6 +174,7 @@ async function load() {
     (prevRow.snapshot || []).forEach(t => prevMap[t.test_name] = t);
 
     const allNames = Array.from(new Set([...Object.keys(curMap), ...Object.keys(prevMap)])).sort();
+    const countableNames = allNames.filter(isCountableTest);
 
     let totalDelta = 0, elevatedDelta = 0, testsIncreased = 0;
     const rowsHtml = allNames.map(name => {
@@ -170,9 +182,15 @@ async function load() {
       const prev = prevMap[name] || { total_count: 0, elevated_count: 0 };
       const dTotal = (cur.total_count || 0) - (prev.total_count || 0);
       const dElev = (cur.elevated_count || 0) - (prev.elevated_count || 0);
-      totalDelta += dTotal;
-      elevatedDelta += dElev;
-      if (dTotal > 0) testsIncreased++;
+      // Only representative rows (real GSP tests, or a kit's Asa-Total/GUAC
+      // row) count toward the summary tiles above -- component analytes are
+      // still shown in the table below for detail, just not summed into the
+      // headline numbers, since they'd otherwise multiply-count one sample.
+      if (isCountableTest(name)) {
+        totalDelta += dTotal;
+        elevatedDelta += dElev;
+        if (dTotal > 0) testsIncreased++;
+      }
       return '<tr>' +
         '<td class="test-name">' + name + '</td>' +
         '<td>' + (prev.total_count ?? 0) + '</td>' +
@@ -189,7 +207,7 @@ async function load() {
     const summaryEl = document.getElementById('summary');
     summaryEl.style.display = 'grid';
     summaryEl.innerHTML =
-      '<div class="metric"><div class="metric-label">Tests with new counts</div><div class="metric-value">' + testsIncreased + ' / ' + allNames.length + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Tests with new counts</div><div class="metric-value">' + testsIncreased + ' / ' + countableNames.length + '</div></div>' +
       '<div class="metric"><div class="metric-label">Total count change</div><div class="metric-value">' + (totalDelta >= 0 ? '+' : '') + totalDelta + '</div></div>' +
       '<div class="metric"><div class="metric-label">Elevated count change</div><div class="metric-value">' + (elevatedDelta >= 0 ? '+' : '') + elevatedDelta + '</div></div>';
 
