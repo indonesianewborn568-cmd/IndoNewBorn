@@ -218,6 +218,7 @@
       <button class="tab" onclick="showPanel('elevated',this)">Elevated</button>
       <button class="tab" onclick="showPanel('chart',this)">Trend chart</button>
       <button class="tab" onclick="showPanel('breakdown',this)">Breakdown</button>
+      <button class="tab" onclick="showPanel('diffsummary',this)">Diff Summary</button>
 
     </div>
     <select id="year-select" onchange="loadData()" title="Year"></select>
@@ -284,6 +285,27 @@
       <table>
         <thead><tr><th id="bd-table-label-col" style="text-align:left">Site</th><th>Count</th><th>% of total</th></tr></thead>
         <tbody id="bd-tbody"><tr><td colspan="3" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="panel-diffsummary" class="panel">
+    <p class="panel-title">Latest push vs. previous push, per instrument &#8212; representative tests only (matches diff.html)</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="text-align:left">Instrument</th>
+            <th style="text-align:left">Site</th>
+            <th style="text-align:left">Country</th>
+            <th>Last Push</th>
+            <th>&Delta; Total</th>
+            <th>&Delta; Elevated</th>
+            <th>Tests w/ New Counts</th>
+            <th>Diff</th>
+          </tr>
+        </thead>
+        <tbody id="ds-tbody"><tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -734,6 +756,120 @@ function showPanel(name, btn) {
   if (name === 'breakdown') {
     populateBreakdownFilters();
     loadBreakdownYears().then(() => loadBreakdown());
+  }
+  if (name === 'diffsummary') {
+    loadDiffSummary();
+  }
+}
+
+// ── Diff Summary tab ─────────────────────────────────────────
+// Same "representative tests only" counting rule as diff.html: real GSP
+// tests, or a kit's own representative row (Asa-Total / GUAC) -- component
+// analytes are excluded from the summed deltas so one sample isn't counted
+// once per analyte tracked.
+function isCountableTestName(name) {
+  return GSP_TESTS.has(name) || Object.prototype.hasOwnProperty.call(MSMS_KITS, name);
+}
+
+async function loadDiffSummary() {
+  const tbody = document.getElementById('ds-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr>';
+  try {
+    // 30-day auto-purge already keeps this table small -- safe to fetch
+    // in one pass rather than paginating.
+    const rows = await sbFrom('push_log', {
+      select: 'id,hostname,pushed_at,snapshot',
+      order: 'pushed_at.desc'
+    });
+
+    // Group by hostname, keep only the 2 most recent *snapshotted* pushes
+    // per instrument (need both to compute a diff).
+    const byHost = {};
+    (rows || []).forEach(r => {
+      if (!r.snapshot) return; // pre-dates snapshotting, nothing to diff
+      if (!byHost[r.hostname]) byHost[r.hostname] = [];
+      if (byHost[r.hostname].length < 2) byHost[r.hostname].push(r);
+    });
+
+    const restrictedHostnames = new Set(
+      (window._instruments || [])
+        .filter(i => isRestrictedName(i.display_name))
+        .map(i => i.hostname)
+    );
+
+    const summaryRows = Object.keys(byHost).map(hostname => {
+      if (!isAdminUser() && restrictedHostnames.has(hostname)) return null;
+      const pushes = byHost[hostname];
+      const instr = (window._instruments || []).find(i => i.hostname === hostname);
+      const name = instr ? instr.display_name : hostname;
+      const site = instr ? (window._sites || []).find(s => s.id == instr.site_id) : null;
+      const country = site ? (window._countries || []).find(c => c.id == site.country_id) : null;
+
+      const cur = pushes[0];
+      const prev = pushes.length > 1 ? pushes[1] : null;
+
+      const row = {
+        hostname, name,
+        site: site ? site.site_name : '—',
+        country: country ? country.country_name : '—',
+        pushedAt: cur.pushed_at,
+        pushId: cur.id,
+        hasPrev: !!prev,
+        totalDelta: null, elevDelta: null, testsChanged: null
+      };
+      if (!prev) return row;
+
+      const cfg = (window._instrConfigs || []).find(c => c.hostname === hostname);
+      const hasMsms = cfg && cfg.instrument_type === 'msms';
+      const curMap = {}; (cur.snapshot || []).forEach(t => curMap[t.test_name] = t);
+      const prevMap = {}; (prev.snapshot || []).forEach(t => prevMap[t.test_name] = t);
+      const allNames = Array.from(new Set([...Object.keys(curMap), ...Object.keys(prevMap)]));
+
+      let totalDelta = 0, elevDelta = 0, testsChanged = 0, countable = 0;
+      allNames.forEach(tn => {
+        if (!isCountableTestName(tn)) return;
+        countable++;
+        const c = curMap[tn] || { total_count: 0, elevated_count: 0 };
+        const p = prevMap[tn] || { total_count: 0, elevated_count: 0 };
+        const dT = (c.total_count || 0) - (p.total_count || 0);
+        const dE = (c.elevated_count || 0) - (p.elevated_count || 0);
+        totalDelta += dT; elevDelta += dE;
+        if (dT !== 0) testsChanged++;
+      });
+      row.totalDelta = totalDelta;
+      row.elevDelta = elevDelta;
+      row.testsChanged = countable > 0 ? (testsChanged + ' / ' + countable) : '—';
+      return row;
+    }).filter(r => r).sort((a, b) => a.name.localeCompare(b.name));
+
+    if (summaryRows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">No push history yet.</td></tr>';
+      return;
+    }
+
+    function fmtDelta(v) {
+      if (v === null) return '<span style="color:var(--muted)">—</span>';
+      if (v > 0) return '<span style="color:var(--teal);font-weight:600;">+' + v + '</span>';
+      if (v < 0) return '<span style="color:#c0392b;font-weight:600;">' + v + '</span>';
+      return '<span style="color:var(--muted)">0</span>';
+    }
+
+    tbody.innerHTML = summaryRows.map(r => {
+      const utc = new Date(r.pushedAt);
+      return '<tr>' +
+        '<td style="text-align:left;font-weight:500;">' + r.name + '</td>' +
+        '<td style="text-align:left;">' + r.site + '</td>' +
+        '<td style="text-align:left;">' + r.country + '</td>' +
+        '<td>' + utc.toLocaleString() + '</td>' +
+        '<td>' + fmtDelta(r.totalDelta) + '</td>' +
+        '<td>' + fmtDelta(r.elevDelta) + '</td>' +
+        '<td>' + (r.testsChanged === null ? '<span style="color:var(--muted)">no earlier push</span>' : r.testsChanged) + '</td>' +
+        '<td><a href="diff.html?id=' + encodeURIComponent(r.pushId) + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-size:12px;font-weight:500;">View diff &rarr;</a></td>' +
+        '</tr>';
+    }).join('');
+
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:#c0392b">Error: ' + e.message + '</td></tr>';
   }
 }
 
