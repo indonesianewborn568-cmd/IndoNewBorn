@@ -334,6 +334,15 @@ const RESTRICTED_DISPLAY_NAMES = new Set(['V2D']);
 function isRestrictedName(name) {
   return !!name && RESTRICTED_DISPLAY_NAMES.has(String(name).trim().toUpperCase());
 }
+// Sticky/permanent check: reads the DB-stored hidden_from_non_admin flag
+// (set once by a Postgres trigger the moment an instrument is ever named
+// "V2D", and never cleared even if later renamed) -- this is what every
+// restriction decision in the dashboard should use, NOT isRestrictedName,
+// since a live name check would let a renamed instrument become visible
+// again.
+function isRestrictedInstrument(instr) {
+  return !!(instr && instr.hidden_from_non_admin === true);
+}
 function isAdminUser() {
   const user = window._currentUser;
   return !!(user && user.role === 'admin');
@@ -494,15 +503,16 @@ async function init() {
     }
 
     // Load instruments
-    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id,active', order: 'display_name.asc' });
-    // Track restricted instrument IDs (matched by CURRENT display_name)
-    // BEFORE filtering the main list, so RPC-result filtering elsewhere
-    // (loadData, loadBreakdown) still knows which instrument_id to exclude
-    // even though it no longer appears in window._instruments for non-admins.
+    const instrs = await sbFrom('instruments', { select: 'id,hostname,display_name,site_id,active,hidden_from_non_admin', order: 'display_name.asc' });
+    // Track restricted instrument IDs using the permanent DB flag (sticky --
+    // set once by a trigger, survives renames) BEFORE filtering the main
+    // list, so RPC-result filtering elsewhere (loadData, loadBreakdown)
+    // still knows which instrument_id to exclude even though it no longer
+    // appears in window._instruments for non-admins.
     window._restrictedInstrumentIds = new Set(
-      (instrs || []).filter(i => !isAdminUser() && isRestrictedName(i.display_name)).map(i => i.id)
+      (instrs || []).filter(i => !isAdminUser() && isRestrictedInstrument(i)).map(i => i.id)
     );
-    window._instruments = (instrs || []).filter(i => isAdminUser() || !isRestrictedName(i.display_name));
+    window._instruments = (instrs || []).filter(i => isAdminUser() || !isRestrictedInstrument(i));
     // Active instruments only shown in dropdown and count, filtered by default country
     const activeInstrs = window._instruments.filter(i => i.active !== false);
     const isel = document.getElementById('instrument-select');
@@ -793,9 +803,19 @@ async function loadDailyBreakdown() {
       order: 'pushed_at.asc' // ascending so the "last push per day" loop below naturally keeps the latest
     });
 
+    // Fetch an INDEPENDENT, unfiltered instrument list just for the
+    // restriction check -- window._instruments is already pre-filtered for
+    // non-admins by init(), so deriving restrictedHostnames from it would
+    // always compute empty and silently do nothing. This re-verifies
+    // against the real, unfiltered table every time, so V2D-named
+    // instruments are hidden here even if the upstream filtering logic
+    // ever changes. Same pattern already used by Push Log elsewhere.
+    // Uses the permanent hidden_from_non_admin flag (sticky -- survives
+    // renames), not a live name check.
+    const allInstrsRaw = await sbFrom('instruments', { select: 'id,hostname,display_name,hidden_from_non_admin' });
     const restrictedHostnames = new Set(
-      (window._instruments || [])
-        .filter(i => isRestrictedName(i.display_name))
+      (allInstrsRaw || [])
+        .filter(i => isRestrictedInstrument(i))
         .map(i => i.hostname)
     );
     const overrides = getUserFilterOverrides(); // respects site_manager / country_manager scope
@@ -820,7 +840,7 @@ async function loadDailyBreakdown() {
     });
 
     const instrRows = (window._instruments || [])
-      .filter(instr => isAdminUser() || !isRestrictedName(instr.display_name))
+      .filter(instr => !isAdminUser() ? !restrictedHostnames.has(instr.hostname) : true)
       .filter(instr => {
         if (!overrides.country_id && !overrides.site_id) return true;
         const site = (window._sites || []).find(s => s.id == instr.site_id);
@@ -2259,19 +2279,19 @@ async function loadPushLog() {
     // Load all instruments/sites/countries for site+country lookup (cache after first load)
     if (!window._allInstruments) {
       const [instResp, siteResp, countryResp] = await Promise.all([
-        fetch(SUPABASE_URL + '/rest/v1/instruments?select=id,hostname,display_name,site_id&active=eq.true', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }),
+        fetch(SUPABASE_URL + '/rest/v1/instruments?select=id,hostname,display_name,site_id,hidden_from_non_admin&active=eq.true', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }),
         fetch(SUPABASE_URL + '/rest/v1/sites?select=id,site_name,country_id', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }),
         fetch(SUPABASE_URL + '/rest/v1/countries?select=id,country_name', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } })
       ]);
       const allInstrs = await instResp.json();
-      // Resolve restricted hostnames live, by CURRENT display_name -- not
-      // push_log's stored snapshot, which could be stale (e.g. before a
-      // rename, or before this instrument existed at all). Cached so the
-      // rows filter below can reuse it on every call, not just first load.
+      // Resolve restricted hostnames using the permanent DB flag (sticky --
+      // survives renames), not push_log's stored snapshot (which could be
+      // stale) or a live name check. Cached so the rows filter below can
+      // reuse it on every call, not just first load.
       window._pushLogRestrictedHostnames = new Set(
-        (allInstrs || []).filter(i => isRestrictedName(i.display_name)).map(i => i.hostname)
+        (allInstrs || []).filter(i => isRestrictedInstrument(i)).map(i => i.hostname)
       );
-      window._allInstruments = (allInstrs || []).filter(i => isAdminUser() || !isRestrictedName(i.display_name));
+      window._allInstruments = (allInstrs || []).filter(i => isAdminUser() || !isRestrictedInstrument(i));
       window._allSites       = await siteResp.json();
       window._allCountries   = await countryResp.json();
     }
