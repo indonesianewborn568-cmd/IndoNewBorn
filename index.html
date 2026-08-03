@@ -185,6 +185,7 @@
         <thead>
           <tr style="border-bottom:0.5px solid var(--border);">
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Instrument</th>
+            <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Hostname</th>
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Site</th>
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Country</th>
             <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--surface);">Pushed at (local)</th>
@@ -194,7 +195,7 @@
           </tr>
         </thead>
         <tbody id="push-log-tbody">
-          <tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>
+          <tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -2301,7 +2302,7 @@ function refreshPushLog() {
 async function loadPushLog() {
   const tbody = document.getElementById('push-log-tbody');
   const filter = document.getElementById('push-log-filter').value;
-  tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--muted)">Loading...</td></tr>';
 
   purgeOldPushLogs(); // fire-and-forget, throttled internally
 
@@ -2358,7 +2359,7 @@ async function loadPushLog() {
     });
 
     if (!rows || rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--muted)">No push records yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--muted)">No push records yet.</td></tr>';
       return;
     }
 
@@ -2397,6 +2398,7 @@ async function loadPushLog() {
       const { site, country } = getSiteCountry(r.hostname);
       return '<tr style="border-bottom:0.5px solid var(--border)">' +
         '<td style="padding:7px 10px;text-align:center;color:var(--text);white-space:nowrap">' + name + '</td>' +
+        '<td style="padding:7px 10px;text-align:center;color:var(--muted);white-space:nowrap;font-family:monospace;font-size:11px;">' + r.hostname + '</td>' +
         '<td style="padding:7px 10px;text-align:center;color:var(--muted);white-space:nowrap">' + site + '</td>' +
         '<td style="padding:7px 10px;text-align:center;color:var(--muted);white-space:nowrap">' + country + '</td>' +
         '<td style="padding:7px 10px;text-align:center;color:var(--muted);white-space:nowrap">' + local + '</td>' +
@@ -2409,7 +2411,7 @@ async function loadPushLog() {
         '</tr>';
     }).join('');
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:#c0392b">Error: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:2rem;text-align:center;color:#c0392b">Error: ' + e.message + '</td></tr>';
   }
 }
 
