@@ -290,7 +290,7 @@
   </div>
 
   <div id="panel-diffsummary" class="panel">
-    <p class="panel-title">Each instrument's new test count per day &#8212; representative tests only (matches diff.html)</p>
+    <p class="panel-title">Each instrument's new test count per day &#8212; representative tests only (matches diff.html). At the start of a new month, the count shown is that day's own total so far (each month's counter starts fresh, so it isn't compared against last month's total).</p>
     <div class="toolbar" style="margin-bottom:1rem;">
       <select id="ds-days-select" onchange="loadDailyBreakdown()" title="Days to show">
         <option value="7" selected>Last 7 days</option>
@@ -874,11 +874,25 @@ async function loadDailyBreakdown() {
       const country = site ? (window._countries || []).find(c => c.id == site.country_id) : null;
       const dayMap = byHostByDay[instr.hostname] || {};
 
+      // Each snapshot only reflects ITS OWN calendar month's cumulative
+      // total (the Supabase trigger scopes it to the push's own year/month).
+      // A delta only means something when comparing two snapshots from the
+      // SAME month -- comparing across a month boundary (e.g. a little bit
+      // of August vs. all of July) produces a meaningless, often hugely
+      // negative, number. So track each baseline's month alongside its sum,
+      // and only compute a real delta when the months match.
+      function monthKeyOf(row) {
+        const d = new Date(row.pushed_at);
+        return d.getFullYear() + '-' + d.getMonth();
+      }
+
       // Find the most recent snapshot strictly before the displayed window,
       // to use as the baseline for the FIRST visible day's delta.
       let priorKey = null, priorRow = null;
       Object.keys(dayMap).sort().forEach(k => { if (k < earliestKey) { priorKey = k; priorRow = dayMap[k]; } });
       let prevSum = priorRow ? sumCountable(priorRow.snapshot) : null;
+      let prevMonthKey = priorRow ? monthKeyOf(priorRow) : null;
+      let hasAnyBaseline = !!priorRow; // becomes true the moment we've seen ANY prior snapshot, ever
 
       let cells = '';
       dayList.forEach(d => {
@@ -888,9 +902,28 @@ async function loadDailyBreakdown() {
           return; // no push that day -- baseline (prevSum) stays as last known value
         }
         const curSum = sumCountable(todayRow.snapshot);
-        const delta = (prevSum === null) ? null : (curSum - prevSum);
+        const curMonthKey = monthKeyOf(todayRow);
+        let delta;
+        if (!hasAnyBaseline) {
+          // Truly the first-ever recorded push for this instrument -- no
+          // baseline exists at all yet, so there's nothing to compare to.
+          delta = null;
+        } else if (curMonthKey === prevMonthKey) {
+          // Normal case: comparing two snapshots from the same month.
+          delta = curSum - prevSum;
+        } else {
+          // A new month started. Each month's total is its own counter that
+          // starts fresh at 0 (not a continuation of last month's total),
+          // so the correct baseline here is 0, not last month's number --
+          // this shows the new month's actual count so far, which IS the
+          // real "new tests" figure, rather than a blank or a nonsensical
+          // number from comparing two different months' totals directly.
+          delta = curSum - 0;
+        }
         cells += '<td>' + fmtDelta(delta) + '</td>';
         prevSum = curSum;
+        prevMonthKey = curMonthKey;
+        hasAnyBaseline = true;
       });
 
       return '<tr>' +
