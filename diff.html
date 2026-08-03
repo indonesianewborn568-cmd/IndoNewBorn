@@ -168,6 +168,26 @@ async function load() {
       return;
     }
 
+    // Each snapshot only reflects ITS OWN calendar month's cumulative total
+    // (the count resets to 0 at the start of every month). Comparing across
+    // a month boundary directly (e.g. a fresh August count vs. July's full
+    // month-end total) produces a meaningless, often hugely negative,
+    // number. When that's the case here, treat the baseline as 0 instead --
+    // this shows "how much has this push's own month accumulated so far",
+    // which is the real, meaningful number, rather than a false negative.
+    // Uses UTC consistently, matching the Daily Breakdown tab's fix.
+    function monthKeyOf(iso) {
+      const d = new Date(iso);
+      return d.getUTCFullYear() + '-' + d.getUTCMonth();
+    }
+    const sameMonth = monthKeyOf(curRow.pushed_at) === monthKeyOf(prevRow.pushed_at);
+    if (!sameMonth) {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:var(--metric);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--muted);margin-bottom:1rem;';
+      banner.innerHTML = '<strong style="color:var(--text)">Different months.</strong> The previous push was in an earlier month, and counts reset to 0 at the start of each month, so this isn\'t compared to that month\'s total. Numbers below show this push\'s own month-to-date totals instead.';
+      document.getElementById('summary').parentNode.insertBefore(banner, document.getElementById('summary'));
+    }
+
     const curMap = {};
     (curRow.snapshot || []).forEach(t => curMap[t.test_name] = t);
     const prevMap = {};
@@ -179,7 +199,11 @@ async function load() {
     let totalDelta = 0, elevatedDelta = 0, testsIncreased = 0;
     const rowsHtml = allNames.map(name => {
       const cur = curMap[name] || { total_count: 0, elevated_count: 0 };
-      const prev = prevMap[name] || { total_count: 0, elevated_count: 0 };
+      // If the previous push was a different month, its totals aren't a
+      // valid baseline -- use 0 instead, so the delta shown is "this
+      // month's total so far", not a nonsensical cross-month subtraction.
+      const prev = sameMonth ? (prevMap[name] || { total_count: 0, elevated_count: 0 }) : { total_count: 0, elevated_count: 0 };
+      const prevRaw = prevMap[name] || { total_count: 0, elevated_count: 0 }; // still shown in the table for reference
       const dTotal = (cur.total_count || 0) - (prev.total_count || 0);
       const dElev = (cur.elevated_count || 0) - (prev.elevated_count || 0);
       // Only representative rows (real GSP tests, or a kit's Asa-Total/GUAC
@@ -193,10 +217,10 @@ async function load() {
       }
       return '<tr>' +
         '<td class="test-name">' + name + '</td>' +
-        '<td>' + (prev.total_count ?? 0) + '</td>' +
+        '<td>' + (prevRaw.total_count ?? 0) + (sameMonth ? '' : ' <span style="color:var(--muted);font-size:11px;">(prior month)</span>') + '</td>' +
         '<td>' + (cur.total_count ?? 0) + '</td>' +
         '<td>' + fmtDelta(dTotal) + '</td>' +
-        '<td>' + (prev.elevated_count ?? 0) + '</td>' +
+        '<td>' + (prevRaw.elevated_count ?? 0) + '</td>' +
         '<td>' + (cur.elevated_count ?? 0) + '</td>' +
         '<td>' + fmtDelta(dElev) + '</td>' +
         '</tr>';
