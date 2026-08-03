@@ -291,7 +291,7 @@
   </div>
 
   <div id="panel-diffsummary" class="panel">
-    <p class="panel-title">Each instrument's new test count per day &#8212; representative tests only (matches diff.html). At the start of a new month, the count shown is that day's own total so far (each month's counter starts fresh, so it isn't compared against last month's total).</p>
+    <p class="panel-title">Each instrument's new test count per day (dates shown in UTC, consistent regardless of your own timezone) &#8212; representative tests only (matches diff.html). At the start of a new month, the count shown is that day's own total so far (each month's counter starts fresh, so it isn't compared against last month's total).</p>
     <div class="toolbar" style="margin-bottom:1rem;">
       <select id="ds-days-select" onchange="loadDailyBreakdown()" title="Days to show">
         <option value="7" selected>Last 7 days</option>
@@ -787,8 +787,14 @@ function sumCountable(snapshot) {
   (snapshot || []).forEach(t => { if (isCountableTestName(t.test_name)) sum += (t.total_count || 0); });
   return sum;
 }
+// Buckets a push into a calendar day using UTC, NOT the viewer's browser
+// timezone. Pushes happen around 16:00 UTC -- close enough to several site
+// timezones' local midnight that using the viewer's own browser timezone
+// could shift a push into the wrong day depending on where THEY happen to
+// be sitting, not where the instrument actually is. UTC is a single, fixed
+// reference everyone sees the same way.
 function localDayKey(d) {
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
 }
 
 async function loadDailyBreakdown() {
@@ -821,12 +827,12 @@ async function loadDailyBreakdown() {
     );
     const overrides = getUserFilterOverrides(); // respects site_manager / country_manager scope
 
-    // Build the last N calendar days, oldest -> newest
+    // Build the last N calendar days (UTC), oldest -> newest
     const today = new Date();
     const dayList = [];
     for (let i = numDays - 1; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-      dayList.push({ key: localDayKey(d), label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) });
+      const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - i));
+      dayList.push({ key: localDayKey(d), label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }) });
     }
     const earliestKey = dayList[0].key;
 
@@ -884,7 +890,7 @@ async function loadDailyBreakdown() {
       // and only compute a real delta when the months match.
       function monthKeyOf(row) {
         const d = new Date(row.pushed_at);
-        return d.getFullYear() + '-' + d.getMonth();
+        return d.getUTCFullYear() + '-' + d.getUTCMonth();
       }
 
       // Find the most recent snapshot strictly before the displayed window,
