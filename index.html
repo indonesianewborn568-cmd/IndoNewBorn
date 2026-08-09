@@ -203,6 +203,25 @@
     </div>
   </div>
 
+  <div id="csv-import-panel" style="display:none;background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="font-size:14px;font-weight:500;">&#128228; CSV Import &#8212; offline site</div>
+      <button class="btn" onclick="toggleCsvImportPanel()" style="font-size:12px">Close</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">
+      Upload the CSV produced by the offline site's Excel export macro. Expected columns:
+      <code style="background:var(--metric);padding:1px 6px;border-radius:4px;">instrument_name,test_name,year,month,total_count,elevated_count</code>.
+      Any instrument name not already in the system will be created automatically (unassigned to a site until you use "&#8635; Move" on it afterward).
+      This writes directly into the same data every automated push uses, so it'll show up in Total/Elevated/Trend chart/Breakdown immediately.
+      <br><br>
+      <strong style="color:var(--text)">One limitation to know:</strong> imported instruments won't appear in Push Log or Daily Breakdown for months other than the current one -- those features rely on a daily push snapshot, which only gets created for whichever rows in this CSV are for the current calendar month. Historical months import fine into the main totals, just without that day-by-day view.
+    </p>
+    <input type="file" id="csv-import-file" accept=".csv" style="font-size:13px;margin-bottom:12px;color:var(--text);">
+    <br>
+    <button class="btn btn-primary" onclick="runCsvImport()" style="font-size:13px;padding:8px 16px;">Import</button>
+    <div id="csv-import-log" style="margin-top:14px;font-size:12px;font-family:monospace;white-space:pre-wrap;max-height:300px;overflow-y:auto;background:var(--metric);border-radius:var(--radius);padding:10px 12px;display:none;"></div>
+  </div>
+
   <div id="config-panel" style="display:none;background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;">
     <div style="font-size:14px;font-weight:500;margin-bottom:12px;">Configure new instruments</div>
     <div id="config-list"></div>
@@ -243,6 +262,7 @@
     <button class="btn" onclick="init()">&#8635; Refresh</button>
     <button class="btn" id="manage-users-btn" onclick="toggleUserPanel()" style="display:none" title="Manage user access">&#128100; Users</button>
     <button class="btn" id="push-log-btn" onclick="togglePushLog()" style="display:none" title="View push log">&#128203; Push Log</button>
+    <button class="btn" id="csv-import-btn" onclick="toggleCsvImportPanel()" style="display:none" title="Import a CSV export from the offline-site Excel macro">&#128228; CSV Import</button>
     <button class="btn" id="reset-push-btn" onclick="triggerResetPush()" style="display:none" title="Admin only — clear last push date for one instrument then trigger full re-push (kept as a fallback, in case it's ever needed)">&#8635; Reset</button>
     <button class="btn ml-auto" onclick="exportCSV()">&#8595; CSV</button>
     <button class="btn btn-primary" onclick="exportCSV()">&#8595; Excel</button>
@@ -1895,7 +1915,7 @@ function applyUserRestrictions() {
 
   // Hide ALL edit controls for non-admins
   if (!isAdmin) {
-    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','reset-push-btn','manage-users-btn','push-log-btn'].forEach(id => {
+    ['rename-btn','rename-site-btn','move-btn','move-site-btn','delink-btn','show-delinked-btn','reset-push-btn','manage-users-btn','push-log-btn','csv-import-btn'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -1908,6 +1928,7 @@ function applyUserRestrictions() {
     document.getElementById('manage-users-btn').style.display = 'inline-flex';
     document.getElementById('push-log-btn').style.display = 'inline-flex';
     document.getElementById('reset-push-btn').style.display = 'inline-flex';
+    document.getElementById('csv-import-btn').style.display = 'inline-flex';
   }
 }
 
@@ -2255,6 +2276,188 @@ function getUserFilterOverrides() {
   if (user.role === 'country_manager') return { country_id: user.country_id };
   if (user.role === 'site_manager')    return { site_id: user.site_id };
   return {};
+}
+
+// -- CSV Import (offline site) ──────────────────────────────────
+function toggleCsvImportPanel() {
+  const panel = document.getElementById('csv-import-panel');
+  panel.style.display = (panel.style.display !== 'none') ? 'none' : 'block';
+}
+
+// Quote-aware CSV parser -- handles fields wrapped in double quotes
+// (with "" as an escaped quote inside), matching exactly what the
+// Excel macro's CsvField() helper produces. A naive comma-split would
+// break on any instrument/test name that happens to contain a comma.
+function parseCsvText(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  // Normalize line endings, then walk character by character.
+  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else {
+      if (c === '"') { inQuotes = true; }
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else { field += c; }
+    }
+  }
+  if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || r[0] !== ''); // drop trailing blank lines
+}
+
+function csvLog(msg) {
+  const el = document.getElementById('csv-import-log');
+  el.style.display = 'block';
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+async function runCsvImport() {
+  const fileInput = document.getElementById('csv-import-file');
+  const logEl = document.getElementById('csv-import-log');
+  logEl.textContent = '';
+  logEl.style.display = 'block';
+
+  if (!fileInput.files || fileInput.files.length === 0) {
+    csvLog('Please choose a CSV file first.');
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const text = await file.text();
+  const allRows = parseCsvText(text);
+  if (allRows.length < 2) {
+    csvLog('File appears empty or has no data rows.');
+    return;
+  }
+
+  const header = allRows[0].map(h => h.trim().toLowerCase());
+  const expected = ['instrument_name', 'test_name', 'year', 'month', 'total_count', 'elevated_count'];
+  const missing = expected.filter(c => !header.includes(c));
+  if (missing.length > 0) {
+    csvLog('ERROR: CSV is missing expected column(s): ' + missing.join(', ') + '\nFound columns: ' + header.join(', '));
+    return;
+  }
+  const idx = {};
+  expected.forEach(c => idx[c] = header.indexOf(c));
+
+  const dataRows = allRows.slice(1).map(r => ({
+    instrument_name: (r[idx.instrument_name] || '').trim(),
+    test_name: (r[idx.test_name] || '').trim(),
+    year: parseInt(r[idx.year]),
+    month: parseInt(r[idx.month]),
+    total_count: parseInt(r[idx.total_count]) || 0,
+    elevated_count: parseInt(r[idx.elevated_count]) || 0
+  })).filter(r => r.instrument_name && r.test_name && r.year && r.month);
+
+  if (dataRows.length === 0) {
+    csvLog('No valid data rows found after parsing.');
+    return;
+  }
+  csvLog('Parsed ' + dataRows.length + ' data row(s) across ' +
+    new Set(dataRows.map(r => r.instrument_name)).size + ' instrument(s). Starting import...\n');
+
+  // Group rows by instrument name
+  const byInstrument = {};
+  dataRows.forEach(r => {
+    if (!byInstrument[r.instrument_name]) byInstrument[r.instrument_name] = [];
+    byInstrument[r.instrument_name].push(r);
+  });
+
+  // Fetch a fresh, independent instrument list (not window._instruments,
+  // to be safe against any staleness) to check what already exists.
+  const existingInstruments = await sbFrom('instruments', { select: 'id,hostname,display_name' });
+
+  const now = new Date();
+  const curYear = now.getUTCFullYear();
+  const curMonth = now.getUTCMonth() + 1;
+
+  let totalRowsImported = 0, instrumentsCreated = 0, instrumentsMatched = 0, snapshotsWritten = 0;
+
+  for (const instrName of Object.keys(byInstrument)) {
+    const rows = byInstrument[instrName];
+    let instrumentId, hostname;
+
+    const existing = existingInstruments.find(i => (i.display_name || '').trim().toLowerCase() === instrName.toLowerCase());
+    if (existing) {
+      instrumentId = existing.id;
+      hostname = existing.hostname;
+      instrumentsMatched++;
+      csvLog('  ' + instrName + ': matched existing instrument (id ' + instrumentId + ')');
+    } else {
+      hostname = 'CSV-IMPORT-' + instrName.replace(/[^a-zA-Z0-9]+/g, '-').toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+      const { data: newInstr, error: insErr } = await _sb.from('instruments')
+        .insert({ hostname, display_name: instrName, active: true })
+        .select('id').single();
+      if (insErr) {
+        csvLog('  ' + instrName + ': FAILED to create instrument -- ' + JSON.stringify(insErr));
+        continue;
+      }
+      instrumentId = newInstr.id;
+      existingInstruments.push({ id: instrumentId, hostname, display_name: instrName });
+      instrumentsCreated++;
+      csvLog('  ' + instrName + ': created new instrument (id ' + instrumentId + ', unassigned -- use "Move" to set its site)');
+    }
+
+    // Upsert every row for this instrument into test_results
+    const upsertRows = rows.map(r => ({
+      instrument_id: instrumentId,
+      test_name: r.test_name,
+      year: r.year,
+      month: r.month,
+      total_count: r.total_count,
+      elevated_count: r.elevated_count
+    }));
+    const { error: upErr } = await _sb.from('test_results')
+      .upsert(upsertRows, { onConflict: 'instrument_id,test_name,year,month' });
+    if (upErr) {
+      csvLog('    FAILED to import ' + upsertRows.length + ' row(s) -- ' + JSON.stringify(upErr));
+      continue;
+    }
+    totalRowsImported += upsertRows.length;
+    csvLog('    imported ' + upsertRows.length + ' row(s) (years: ' + [...new Set(rows.map(r => r.year))].join(', ') + ')');
+
+    // If this instrument has current-month data, also write a push_log
+    // snapshot -- same shape the live trigger produces -- so Push Log,
+    // Daily Breakdown, and diff.html work for it going forward, not just
+    // the main Total/Elevated tables.
+    const hasCurrentMonth = rows.some(r => r.year === curYear && r.month === curMonth);
+    if (hasCurrentMonth) {
+      const { data: curMonthRows } = await _sb.from('test_results')
+        .select('test_name,total_count,elevated_count')
+        .eq('instrument_id', instrumentId)
+        .eq('year', curYear)
+        .eq('month', curMonth);
+      const snapshot = (curMonthRows || []).map(t => ({
+        test_name: t.test_name, total_count: t.total_count, elevated_count: t.elevated_count
+      }));
+      const { error: plErr } = await _sb.from('push_log').insert({
+        hostname, display_name: instrName, instrument_id: instrumentId,
+        pushed_at: now.toISOString(), snapshot
+      });
+      if (plErr) {
+        csvLog('    (could not write push log snapshot -- ' + JSON.stringify(plErr) + ')');
+      } else {
+        snapshotsWritten++;
+        csvLog('    also recorded a push_log snapshot for ' + curYear + '-' + curMonth + ' (current month)');
+      }
+    }
+  }
+
+  csvLog('\nDone. ' + totalRowsImported + ' row(s) imported across ' + Object.keys(byInstrument).length +
+    ' instrument(s) (' + instrumentsCreated + ' created, ' + instrumentsMatched + ' matched existing, ' +
+    snapshotsWritten + ' current-month snapshot(s) recorded).');
+  csvLog('Refreshing dashboard...');
+  await init();
+  csvLog('Refresh complete.');
 }
 
 // -- Push Log ─────────────────────────────────────────────────
