@@ -208,14 +208,6 @@
       <div style="font-size:14px;font-weight:500;">&#128228; CSV Import &#8212; offline site</div>
       <button class="btn" onclick="toggleCsvImportPanel()" style="font-size:12px">Close</button>
     </div>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">
-      Upload the CSV produced by the offline site's Excel export macro. Expected columns:
-      <code style="background:var(--metric);padding:1px 6px;border-radius:4px;">instrument_name,test_name,year,month,total_count,elevated_count</code>.
-      Any instrument name not already in the system will be created automatically (unassigned to a site until you use "&#8635; Move" on it afterward).
-      This writes directly into the same data every automated push uses, so it'll show up in Total/Elevated/Trend chart/Breakdown immediately.
-      <br><br>
-      <strong style="color:var(--text)">One limitation to know:</strong> imported instruments won't appear in Push Log or Daily Breakdown for months other than the current one -- those features rely on a daily push snapshot, which only gets created for whichever rows in this CSV are for the current calendar month. Historical months import fine into the main totals, just without that day-by-day view.
-    </p>
     <input type="file" id="csv-import-file" accept=".csv" style="font-size:13px;margin-bottom:12px;color:var(--text);">
     <br>
     <button class="btn btn-primary" onclick="runCsvImport()" style="font-size:13px;padding:8px 16px;">Import</button>
@@ -313,7 +305,6 @@
   </div>
 
   <div id="panel-diffsummary" class="panel">
-    <p class="panel-title">Each instrument's new test count per day (dates shown in UTC, consistent regardless of your own timezone) &#8212; representative tests only (matches diff.html). At the start of a new month, the count shown is that day's own total so far (each month's counter starts fresh, so it isn't compared against last month's total).</p>
     <div class="toolbar" style="margin-bottom:1rem;">
       <select id="ds-days-select" onchange="loadDailyBreakdown()" title="Days to show">
         <option value="7" selected>Last 7 days</option>
