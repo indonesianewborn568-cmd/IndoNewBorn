@@ -2122,6 +2122,24 @@ async function loadUserList() {
     row.appendChild(tokenSpan);
     row.appendChild(toggleBtn);
 
+    // Get URL button -- copies the CURRENT shareable link, without
+    // touching the token at all. "New URL" below is the destructive
+    // action (regenerates the token, invalidating the old link); this
+    // one is just for grabbing the existing link to share.
+    var getUrlBtn = document.createElement('button');
+    getUrlBtn.className = 'btn';
+    getUrlBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+    getUrlBtn.textContent = 'Get URL';
+    getUrlBtn.dataset.token = u.token;
+    getUrlBtn.addEventListener('click', function() {
+      const url = location.origin + location.pathname + '?token=' + this.dataset.token;
+      navigator.clipboard.writeText(url);
+      const original = this.textContent;
+      this.textContent = 'Copied!';
+      setTimeout(() => { this.textContent = original; }, 1500);
+    });
+    row.appendChild(getUrlBtn);
+
     // Regenerate URL button
     var regenBtn = document.createElement('button');
     regenBtn.className = 'btn';
