@@ -365,6 +365,16 @@ function isAdminUser() {
   return !!(user && user.role === 'admin');
 }
 
+// V2D is restricted specifically from the Indonesia country_manager role --
+// NOT from every non-admin. Admin, Global Viewer, other country managers,
+// site managers, etc. can all see V2D normally; only a country_manager
+// whose scope is Indonesia specifically cannot.
+function isRestrictedFromV2D() {
+  const user = window._currentUser;
+  if (!user) return true; // no logged-in user -- default to restricted
+  return !(user.role === 'admin' || user.role === 'global_viewer');
+}
+
 const GSP_TESTS = new Set(["TSH","G6PD","N17P","IRT","GALT","CKMM","N17OHP","PKU","CHT","CAH","GAL","CF","SCD","BIOTINIDASE","HGB","HbS","Phe","17-OHP"]);
 
 // MSMS kit representatives -- shared between the main table view and the
@@ -527,9 +537,9 @@ async function init() {
     // still knows which instrument_id to exclude even though it no longer
     // appears in window._instruments for non-admins.
     window._restrictedInstrumentIds = new Set(
-      (instrs || []).filter(i => !isAdminUser() && isRestrictedInstrument(i)).map(i => i.id)
+      (instrs || []).filter(i => isRestrictedFromV2D() && isRestrictedInstrument(i)).map(i => i.id)
     );
-    window._instruments = (instrs || []).filter(i => isAdminUser() || !isRestrictedInstrument(i));
+    window._instruments = (instrs || []).filter(i => !isRestrictedFromV2D() || !isRestrictedInstrument(i));
     // Active instruments only shown in dropdown and count, filtered by default country
     const activeInstrs = window._instruments.filter(i => i.active !== false);
     const isel = document.getElementById('instrument-select');
@@ -856,14 +866,14 @@ async function loadDailyBreakdown() {
     const byHostByDay = {};
     (rows || []).forEach(r => {
       if (!r.snapshot) return; // pre-dates snapshotting
-      if (!isAdminUser() && restrictedHostnames.has(r.hostname)) return;
+      if (isRestrictedFromV2D() && restrictedHostnames.has(r.hostname)) return;
       const dayKey = localDayKey(new Date(r.pushed_at));
       if (!byHostByDay[r.hostname]) byHostByDay[r.hostname] = {};
       byHostByDay[r.hostname][dayKey] = r; // ascending order means later pushes overwrite earlier ones
     });
 
     const instrRows = (window._instruments || [])
-      .filter(instr => !isAdminUser() ? !restrictedHostnames.has(instr.hostname) : true)
+      .filter(instr => isRestrictedFromV2D() ? !restrictedHostnames.has(instr.hostname) : true)
       .filter(instr => {
         if (!overrides.country_id && !overrides.site_id) return true;
         const site = (window._sites || []).find(s => s.id == instr.site_id);
@@ -2695,7 +2705,7 @@ async function loadPushLog() {
       window._pushLogRestrictedHostnames = new Set(
         (allInstrs || []).filter(i => isRestrictedInstrument(i)).map(i => i.hostname)
       );
-      window._allInstruments = (allInstrs || []).filter(i => isAdminUser() || !isRestrictedInstrument(i));
+      window._allInstruments = (allInstrs || []).filter(i => !isRestrictedFromV2D() || !isRestrictedInstrument(i));
       window._allSites       = await siteResp.json();
       window._allCountries   = await countryResp.json();
     }
@@ -2710,7 +2720,7 @@ async function loadPushLog() {
     // live-resolved set above, so it covers every historical row for that
     // physical instrument, not just ones pushed after it was named V2D.
     const restrictedHostnames = window._pushLogRestrictedHostnames || new Set();
-    const rows = (rawRows || []).filter(r => isAdminUser() || !restrictedHostnames.has(r.hostname));
+    const rows = (rawRows || []).filter(r => !isRestrictedFromV2D() || !restrictedHostnames.has(r.hostname));
 
     // Populate filter dropdown with unique instruments
     const filterSel = document.getElementById('push-log-filter');
