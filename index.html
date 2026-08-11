@@ -214,6 +214,7 @@
     <br>
     <button class="btn btn-primary" onclick="runCsvImport()" style="font-size:13px;padding:8px 16px;">Import</button>
     <div id="csv-import-log" style="margin-top:14px;font-size:12px;font-family:monospace;white-space:pre-wrap;max-height:300px;overflow-y:auto;background:var(--metric);border-radius:var(--radius);padding:10px 12px;display:none;"></div>
+    <div id="csv-assignment-form" style="margin-top:14px;display:none;"></div>
   </div>
 
   <div id="config-panel" style="display:none;background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1.5rem;">
@@ -2337,6 +2338,8 @@ async function runCsvImport() {
   const logEl = document.getElementById('csv-import-log');
   logEl.textContent = '';
   logEl.style.display = 'block';
+  document.getElementById('csv-assignment-form').style.display = 'none';
+  document.getElementById('csv-assignment-form').innerHTML = '';
 
   if (!fileInput.files || fileInput.files.length === 0) {
     csvLog('Please choose a CSV file first.');
@@ -2375,7 +2378,7 @@ async function runCsvImport() {
     return;
   }
   csvLog('Parsed ' + dataRows.length + ' data row(s) across ' +
-    new Set(dataRows.map(r => r.instrument_name)).size + ' instrument(s). Starting import...\n');
+    new Set(dataRows.map(r => r.instrument_name)).size + ' instrument(s).');
 
   // Group rows by instrument name
   const byInstrument = {};
@@ -2387,7 +2390,149 @@ async function runCsvImport() {
   // Fetch a fresh, independent instrument list (not window._instruments,
   // to be safe against any staleness) to check what already exists.
   const existingInstruments = await sbFrom('instruments', { select: 'id,hostname,display_name' });
+  window._csvImportState = { byInstrument, existingInstruments };
 
+  const newNames = Object.keys(byInstrument).filter(name =>
+    !existingInstruments.some(i => (i.display_name || '').trim().toLowerCase() === name.toLowerCase())
+  );
+
+  if (newNames.length === 0) {
+    csvLog('All instrument names already exist -- no site assignment needed. Starting import...\n');
+    await executeCsvImport({});
+    return;
+  }
+
+  csvLog('Found ' + newNames.length + ' new instrument name(s) not yet in the system:\n  ' + newNames.join('\n  ') +
+    '\n\nAssign a site for each below, then click "Continue Import".');
+  renderCsvAssignmentForm(newNames);
+}
+
+// Builds a site/country picker for each newly-discovered instrument name --
+// same widget pattern as the existing "Configure new instruments" panel --
+// so a site is assigned as PART of the import, not a follow-up step that's
+// easy to forget (CSV-imported instruments never go through
+// instrument_config, so the normal "pending configuration" banner never
+// catches them).
+function renderCsvAssignmentForm(newNames) {
+  const container = document.getElementById('csv-assignment-form');
+  container.style.display = 'block';
+  container.innerHTML = '';
+
+  const countryOptions = (window._countries || []).map(c =>
+    '<option value="' + c.id + '">' + c.country_name + '</option>'
+  ).join('');
+  const selStyle = 'font-size:13px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface);color:var(--text);width:150px;';
+  const inputStyle = selStyle + 'display:none;';
+
+  newNames.forEach(name => {
+    const safeName = name.replace(/"/g, '&quot;');
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;';
+    row.dataset.instrName = name;
+
+    var nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'font-size:13px;min-width:160px;font-weight:500;';
+    nameSpan.textContent = name;
+
+    var snameSelect = document.createElement('select');
+    snameSelect.className = 'csv-assign-site';
+    snameSelect.style.cssText = selStyle;
+    snameSelect.innerHTML = '<option value="">Select site</option>' +
+      (window._sites || []).map(s => '<option value="' + s.id + '">' + s.site_name + '</option>').join('') +
+      '<option value="__new__">+ Add new site...</option>';
+
+    var snameNew = document.createElement('input');
+    snameNew.className = 'csv-assign-site-new';
+    snameNew.type = 'text';
+    snameNew.placeholder = 'New site name';
+    snameNew.style.cssText = inputStyle;
+
+    var cnameSelect = document.createElement('select');
+    cnameSelect.className = 'csv-assign-country';
+    cnameSelect.style.cssText = selStyle;
+    cnameSelect.innerHTML = '<option value="">Select country</option>' + countryOptions + '<option value="__new__">+ Add new country...</option>';
+
+    var cnameNew = document.createElement('input');
+    cnameNew.className = 'csv-assign-country-new';
+    cnameNew.type = 'text';
+    cnameNew.placeholder = 'New country name';
+    cnameNew.style.cssText = inputStyle;
+
+    snameSelect.addEventListener('change', function() {
+      snameNew.style.display = this.value === '__new__' ? 'inline-block' : 'none';
+      var selectedSite = (window._sites || []).find(s => s.id == this.value);
+      if (selectedSite && selectedSite.country_id) cnameSelect.value = selectedSite.country_id;
+    });
+    cnameSelect.addEventListener('change', function() {
+      cnameNew.style.display = this.value === '__new__' ? 'inline-block' : 'none';
+    });
+
+    row.appendChild(nameSpan);
+    row.appendChild(snameSelect);
+    row.appendChild(snameNew);
+    row.appendChild(cnameSelect);
+    row.appendChild(cnameNew);
+    container.appendChild(row);
+  });
+
+  var continueBtn = document.createElement('button');
+  continueBtn.className = 'btn btn-primary';
+  continueBtn.textContent = 'Continue Import';
+  continueBtn.style.cssText = 'margin-top:6px;font-size:13px;padding:8px 16px;';
+  continueBtn.addEventListener('click', confirmCsvAssignmentsAndImport);
+  container.appendChild(continueBtn);
+}
+
+async function confirmCsvAssignmentsAndImport() {
+  const rows = document.querySelectorAll('#csv-assignment-form > div[data-instr-name]');
+  const assignments = {};
+
+  for (const row of rows) {
+    const name = row.dataset.instrName;
+    const siteSelect = row.querySelector('.csv-assign-site');
+    const siteNewInput = row.querySelector('.csv-assign-site-new');
+    const countrySelect = row.querySelector('.csv-assign-country');
+    const countryNewInput = row.querySelector('.csv-assign-country-new');
+
+    let siteId;
+    if (siteSelect.value === '__new__') {
+      const newSiteName = siteNewInput.value.trim();
+      if (!newSiteName) { csvLog('ERROR: Please enter a site name for "' + name + '" or choose an existing one.'); return; }
+
+      let countryId = null;
+      if (countrySelect.value === '__new__') {
+        const newCountryName = countryNewInput.value.trim();
+        if (!newCountryName) { csvLog('ERROR: Please enter a country name for the new site under "' + name + '".'); return; }
+        const { data: nc, error: cErr } = await _sb.from('countries').insert({ country_name: newCountryName }).select('id').single();
+        if (cErr) { csvLog('ERROR creating country "' + newCountryName + '": ' + JSON.stringify(cErr)); return; }
+        countryId = nc.id;
+        window._countries.push({ id: countryId, country_name: newCountryName });
+      } else if (countrySelect.value) {
+        countryId = parseInt(countrySelect.value);
+      }
+
+      const sitePayload = { site_name: newSiteName };
+      if (countryId) sitePayload.country_id = countryId;
+      const { data: ns, error: sErr } = await _sb.from('sites').insert(sitePayload).select('id').single();
+      if (sErr) { csvLog('ERROR creating site "' + newSiteName + '": ' + JSON.stringify(sErr)); return; }
+      siteId = ns.id;
+      window._sites.push({ id: siteId, site_name: newSiteName, country_id: countryId });
+    } else if (siteSelect.value) {
+      siteId = parseInt(siteSelect.value);
+    } else {
+      csvLog('ERROR: Please select (or add) a site for "' + name + '" before continuing.');
+      return;
+    }
+    assignments[name] = siteId;
+  }
+
+  csvLog('\nAll sites assigned. Proceeding with import...\n');
+  document.getElementById('csv-assignment-form').style.display = 'none';
+  await executeCsvImport(assignments);
+}
+
+async function executeCsvImport(siteAssignments) {
+  const { byInstrument, existingInstruments } = window._csvImportState;
   const now = new Date();
   const curYear = now.getUTCFullYear();
   const curMonth = now.getUTCMonth() + 1;
@@ -2406,8 +2551,9 @@ async function runCsvImport() {
       csvLog('  ' + instrName + ': matched existing instrument (id ' + instrumentId + ')');
     } else {
       hostname = 'CSV-IMPORT-' + instrName.replace(/[^a-zA-Z0-9]+/g, '-').toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+      const siteId = siteAssignments[instrName] || null;
       const { data: newInstr, error: insErr } = await _sb.from('instruments')
-        .insert({ hostname, display_name: instrName, active: true })
+        .insert({ hostname, display_name: instrName, active: true, site_id: siteId })
         .select('id').single();
       if (insErr) {
         csvLog('  ' + instrName + ': FAILED to create instrument -- ' + JSON.stringify(insErr));
@@ -2416,7 +2562,8 @@ async function runCsvImport() {
       instrumentId = newInstr.id;
       existingInstruments.push({ id: instrumentId, hostname, display_name: instrName });
       instrumentsCreated++;
-      csvLog('  ' + instrName + ': created new instrument (id ' + instrumentId + ', unassigned -- use "Move" to set its site)');
+      const siteObj = siteId ? (window._sites || []).find(s => s.id === siteId) : null;
+      csvLog('  ' + instrName + ': created new instrument (id ' + instrumentId + ')' + (siteObj ? ', assigned to ' + siteObj.site_name : ''));
     }
 
     // Upsert every row for this instrument into test_results
